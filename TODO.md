@@ -95,6 +95,9 @@ Target box: ASUS GR6 mini PC, Xubuntu. See [deploy/README.md](deploy/README.md).
 - [ ] **Reboot test.** Everything above is untested on the actual hardware — pull the
       power and confirm it comes back to the slideshow unattended.
 - [ ] Fill in `UBUNTU_IP` in [home-assistant.yaml](home-assistant.yaml).
+- [ ] **Move off Ubuntu 25.04.** It went EOL in January — the archive still serves it, so
+      nothing is broken, but `plucky-security` has stopped publishing patches on a box
+      that's powered on permanently. 26.04 LTS rather than the next interim release.
 - [ ] Check GPU acceleration on the GR6 (`chrome://gpu`). A full-screen 28px blur at
       1080×1920 on decade-old hardware is fine on the GPU and painful on llvmpipe.
 - [ ] **Scheduled on/off** via Home Assistant — dark overnight. Saves the panel and stops
@@ -159,6 +162,9 @@ the GR6. See [lib/](lib/).
       dropped so a stale client doesn't break; bad values for known keys are rejected with
       a reason.
 - [ ] **Decide on network exposure.** The server binds `0.0.0.0` with no auth, which is
-      what makes the Home Assistant integration simple — fine on a trusted LAN, but worth a
-      conscious decision rather than a default. At minimum, don't port-forward it.
+      what makes the Home Assistant integration a two-line `rest_command`. Never
+      port-forward it. The GR6 is already on Tailscale, so remote access is
+      `http://steve-gr6:3000/admin` over the tailnet — which is the right answer, but it
+      does mean every device on the tailnet can drive the wall, not just the studio LAN.
+      Fine, probably; worth being a decision rather than a surprise.
 - [ ] Consider git-lfs if I ever want the media itself versioned — it's gitignored today.
