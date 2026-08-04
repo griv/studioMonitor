@@ -315,16 +315,45 @@
       border-color: var(--green);
       color: #000;
     }
-    .thumb-fit {
+    /* Corner badges. Both are real tap targets: fit used to be reachable only by
+       shift-click or right-click, neither of which exists on the phone this is
+       actually driven from. */
+    .thumb-fit, .thumb-meta {
       position: absolute;
-      bottom: 5px; left: 5px;
+      bottom: 4px;
+      min-width: 26px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       font-size: 9px;
       letter-spacing: 0.05em;
       color: rgba(255,255,255,0.5);
       background: rgba(0,0,0,0.55);
-      padding: 2px 5px;
+      padding: 0 5px;
       border-radius: 4px;
-      pointer-events: none;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .thumb-fit { left: 4px; }
+    .thumb-meta { right: 4px; font-size: 11px; }
+    .thumb-fit:hover, .thumb-meta:hover { background: rgba(0,0,0,0.85); color: #fff; }
+
+    /* Solid when the piece has attribution, hollow when it still needs typing —
+       so an unfilled bank is visible at a glance. */
+    .thumb-meta.has-meta { color: var(--green); border: 1px solid rgba(74,222,128,0.4); }
+
+    .thumb-item.missing { outline: 1px solid rgba(248,113,113,0.5); }
+    .thumb-item.missing::after {
+      content: 'MISSING';
+      position: absolute;
+      top: 6px; left: 6px;
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      color: #f87171;
+      background: rgba(0,0,0,0.7);
+      padding: 2px 4px;
+      border-radius: 3px;
     }
 
     /* ── Upload drop zone ── */
@@ -344,7 +373,10 @@
       color: var(--dim);
       background: rgba(255,255,255,0.02);
     }
-    .drop-zone input[type="file"] { display: none; }
+    /* Both zones are click-through to a hidden input; #new-bank-zone was missing
+       this rule, so the raw "Choose files" control showed on the page. */
+    .drop-zone input[type="file"],
+    #new-bank-zone input[type="file"] { display: none; }
 
     /* ── New bank zone ── */
     #new-bank-zone {
@@ -365,8 +397,9 @@
     }
     #new-bank-zone .hint { font-size: 11px; color: var(--dimmer); margin-top: 4px; }
 
-    /* ── Modal ── */
-    #modal-backdrop {
+    /* ── Modals ── */
+    /* Bottom sheet on a phone, centred dialog from 600px. */
+    .modal-backdrop {
       display: none;
       position: fixed;
       inset: 0;
@@ -375,11 +408,11 @@
       align-items: flex-end;
       justify-content: center;
     }
-    #modal-backdrop.open { display: flex; }
+    .modal-backdrop.open { display: flex; }
     @media (min-width: 600px) {
-      #modal-backdrop { align-items: center; }
+      .modal-backdrop { align-items: center; }
     }
-    #modal {
+    .modal {
       background: var(--surface);
       border: 1px solid var(--border-hi);
       border-radius: 16px 16px 0 0;
@@ -390,9 +423,54 @@
       overflow-y: auto;
     }
     @media (min-width: 600px) {
-      #modal { border-radius: 16px; }
+      .modal { border-radius: 16px; }
     }
-    #modal h3 { font-size: 16px; font-weight: 600; margin-bottom: 24px; }
+    .modal h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .modal .modal-sub {
+      font-size: 12px;
+      color: var(--dimmer);
+      margin-bottom: 22px;
+      /* anywhere, not break-all: long filenames must wrap, ordinary prose must not. */
+      overflow-wrap: anywhere;
+    }
+
+    /* Two fields side by side — year/medium and the like waste a whole row alone. */
+    .field-row { display: flex; gap: 12px; }
+    .field-row .field { flex: 1; min-width: 0; }
+
+    /* Shows what a blank field will inherit from the bank. */
+    .field .inherit-hint {
+      font-size: 11px;
+      color: var(--dimmer);
+      margin-top: 6px;
+    }
+
+    /* Segmented control, for choices with exactly two or three options. */
+    .segmented { display: flex; gap: 6px; flex-wrap: wrap; }
+    .segmented button {
+      flex: 1;
+      min-width: 64px;   /* four options fit one row at 390px */
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--dim);
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .segmented button.on { border-color: rgba(255,255,255,0.4); color: #fff; background: var(--surface2); }
+
+    /* Preview of the piece being edited, so you know what you're captioning. */
+    .item-preview {
+      width: 100%;
+      height: 160px;
+      object-fit: contain;
+      background: var(--surface2);
+      border-radius: 8px;
+      margin-bottom: 20px;
+      display: block;
+    }
 
     .field { margin-bottom: 20px; }
     .field label {
@@ -466,11 +544,18 @@
     }
     .toggle-switch.on::after { transform: translateX(16px); }
 
+    /* Sticky, because the attribution form is taller than a phone screen and
+       Save would otherwise sit below the fold every single time. */
     .modal-actions {
       display: flex;
       gap: 8px;
       margin-top: 28px;
       flex-wrap: wrap;
+      position: sticky;
+      bottom: -40px;
+      background: var(--surface);
+      padding: 12px 0 0;
+      box-shadow: 0 -12px 16px -4px var(--surface);
     }
     .modal-actions .spacer { flex: 1; }
 
@@ -562,8 +647,8 @@
 </div>
 
 <!-- Vibe editor modal -->
-<div id="modal-backdrop">
-  <div id="modal">
+<div id="modal-backdrop" class="modal-backdrop">
+  <div id="modal" class="modal">
     <h3 id="modal-title">Edit Vibe</h3>
     <div class="field">
       <label>Name</label>
@@ -613,6 +698,110 @@
   </div>
 </div>
 
+<!-- Item metadata editor -->
+<div id="item-backdrop" class="modal-backdrop">
+  <div class="modal">
+    <h3>Artwork</h3>
+    <div class="modal-sub" id="item-filename"></div>
+    <img id="item-preview" class="item-preview" alt="">
+
+    <div class="field">
+      <label>Title</label>
+      <input type="text" id="item-title" placeholder="e.g. The Ten Largest, No. 7">
+    </div>
+    <div class="field">
+      <label>Artist</label>
+      <input type="text" id="item-artist" list="artist-list" placeholder="Who made it">
+      <datalist id="artist-list"></datalist>
+      <div class="inherit-hint" id="item-artist-hint"></div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Year</label>
+        <input type="text" id="item-year" placeholder="1907, c. 1972, n.d.">
+      </div>
+      <div class="field">
+        <label>Medium</label>
+        <input type="text" id="item-medium" placeholder="Tempera on paper">
+      </div>
+    </div>
+    <div class="field">
+      <label>Source</label>
+      <input type="text" id="item-source" placeholder="Where you found it — never shown on the wall">
+    </div>
+    <div class="field">
+      <label>Fit</label>
+      <select id="item-fit" class="fit-select" style="width:100%"></select>
+    </div>
+    <div class="field">
+      <label>In rotation</label>
+      <div class="toggle-row">
+        <span style="font-size:13px;color:var(--dim)">Show on the wall</span>
+        <div id="item-enabled" class="toggle-switch"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button class="btn small" id="item-cancel">Cancel</button>
+      <button class="btn primary small" id="item-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bank settings -->
+<div id="bank-backdrop" class="modal-backdrop">
+  <div class="modal">
+    <h3 id="bank-modal-title">Bank</h3>
+    <div class="modal-sub">Defaults every piece in this bank inherits unless it says otherwise.</div>
+
+    <div class="field">
+      <label>Kind</label>
+      <div class="segmented" id="bank-kind">
+        <button data-value="mine">My work</button>
+        <button data-value="inspiration">Inspiration</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Default fit</label>
+      <select id="bank-fit" class="fit-select" style="width:100%"></select>
+    </div>
+    <div class="field">
+      <label>Default artist</label>
+      <input type="text" id="bank-artist" list="artist-list" placeholder="If the whole bank is one artist">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Default year</label>
+        <input type="text" id="bank-year">
+      </div>
+      <div class="field">
+        <label>Default medium</label>
+        <input type="text" id="bank-medium">
+      </div>
+    </div>
+    <div class="field">
+      <label>Default source</label>
+      <input type="text" id="bank-source">
+    </div>
+    <div class="field">
+      <label>Caption</label>
+      <div class="segmented" id="bank-caption">
+        <button data-value="">Inherit</button>
+        <button data-value="collection">On change</button>
+        <button data-value="item">Each piece</button>
+        <button data-value="always">Always</button>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button class="btn small" id="bank-cancel">Cancel</button>
+      <button class="btn primary small" id="bank-save">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Name prompt for new bank -->
 <div id="prompt-backdrop">
   <div id="prompt-box">
@@ -631,8 +820,11 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 let banks = [];
 let vibesData = { vibes: [] };
+let artists = [];
 let displayState = {};
 let pendingUploadFiles = null;
+let editingItemId = null;
+let editingBankName = null;
 
 // An id, deliberately not an object. renderBanks() and uploadToBank() replace the
 // cached objects wholesale, so a reference captured when a modal opened can be
@@ -699,19 +891,42 @@ function toast(msg) {
 
 // ── Load ──────────────────────────────────────────────────────────────────────
 async function loadAll() {
-  [banks, vibesData, displayState] = await Promise.all([
+  [banks, vibesData, displayState, artists] = await Promise.all([
     api.get('/api/banks'),
     api.get('/api/vibes'),
     api.get('/api/status'),
+    api.get('/api/artists'),
   ]);
   knownLibraryVersion = displayState.libraryVersion || 0;
+  renderArtistList();
   render();
 }
+
+// Feeds the artist <datalist>, so the second piece by someone is one tap and the
+// name is spelled the same way — which matters once "play everything by X" is a
+// playlist source.
+function renderArtistList() {
+  const list = document.getElementById('artist-list');
+  list.innerHTML = '';
+  artists.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a.artist;
+    opt.label = `${a.count} piece${a.count === 1 ? '' : 's'}`;
+    list.appendChild(opt);
+  });
+}
+
+async function refreshArtists() {
+  artists = await api.get('/api/artists');
+  renderArtistList();
+}
+
+const findItem = id => banks.flatMap(b => b.items).find(i => i.id === id);
 
 // Called when the server's library version moves past ours. Refetching while a
 // modal is open would pull the ground out from under a form mid-edit, so defer.
 async function refreshLibrary() {
-  if (document.querySelector('#modal-backdrop.open, #prompt-backdrop.open')) {
+  if (document.querySelector('.modal-backdrop.open, #prompt-backdrop.open')) {
     libraryDirty = true;
     return;
   }
@@ -857,6 +1072,23 @@ function buildBankCard(bank, startOpen) {
   fitLabel.appendChild(fitSel);
   controls.appendChild(fitLabel);
 
+  // Fit stays inline because it's the common action; everything else lives behind
+  // this, or the controls row becomes a wall of text on a phone.
+  const settingsBtn = document.createElement('button');
+  settingsBtn.className = 'btn icon';
+  settingsBtn.textContent = '⚙';
+  settingsBtn.title = 'Bank settings and default attribution';
+  settingsBtn.onclick = e => { e.stopPropagation(); openBankModal(bank); };
+  controls.appendChild(settingsBtn);
+
+  // A bank that's all one artist only needs saying once.
+  if (bank.defaultArtist) {
+    const who = document.createElement('span');
+    who.style.cssText = 'font-size:11px;color:var(--dimmer);align-self:center';
+    who.textContent = `all ${bank.defaultArtist}`;
+    controls.appendChild(who);
+  }
+
   // Vibe membership tags
   const vibesWrap = document.createElement('div');
   vibesWrap.className = 'bank-vibes';
@@ -902,7 +1134,8 @@ function buildBankCard(bank, startOpen) {
 
 function buildThumb(bankName, item) {
   const wrap = document.createElement('div');
-  wrap.className = 'thumb-item ' + (item.enabled ? 'enabled' : 'disabled');
+  wrap.className = 'thumb-item ' + (item.enabled ? 'enabled' : 'disabled') + (item.missing ? ' missing' : '');
+  wrap.dataset.itemId = item.id;
   wrap.title = item.name;
 
   if (item.type === 'image') {
@@ -936,23 +1169,58 @@ function buildThumb(bankName, item) {
 
   const fitBadge = document.createElement('div');
   fitBadge.className = 'thumb-fit';
-  fitBadge.textContent = item.fit ? FIT_LABELS[item.fit] : '·';
+
+  const metaBadge = document.createElement('div');
+  metaBadge.className = 'thumb-meta';
+  metaBadge.textContent = '✎';
 
   wrap.appendChild(overlay);
   wrap.appendChild(toggle);
   wrap.appendChild(fitBadge);
+  wrap.appendChild(metaBadge);
+  paintThumbBadges(wrap, item);
 
-  // Click → cycle fit on right-click, toggle enabled on left-click
-  wrap.onclick = e => {
-    if (e.shiftKey) {
-      cycleFit(bankName, item, wrap, fitBadge);
-    } else {
-      toggleItem(bankName, item, wrap, toggle);
-    }
-  };
-  wrap.oncontextmenu = e => { e.preventDefault(); cycleFit(bankName, item, wrap, fitBadge); };
+  // Tap the thumbnail to include or exclude it; tap either badge to edit it.
+  // Fit used to be bound to shift-click and right-click, so it was unreachable
+  // from the phone this is actually driven from.
+  wrap.onclick = () => toggleItem(bankName, item, wrap, toggle);
+  const edit = e => { e.stopPropagation(); openItemModal(item); };
+  fitBadge.onclick = edit;
+  metaBadge.onclick = edit;
 
   return wrap;
+}
+
+function paintThumbBadges(wrap, item) {
+  const fitBadge = wrap.querySelector('.thumb-fit');
+  fitBadge.textContent = item.fit ? FIT_LABELS[item.fit] : '·';
+  fitBadge.title = item.fit
+    ? `Fit: ${item.fit}`
+    : `Fit: inherits ${item.effective?.fit || 'the global setting'}`;
+
+  const metaBadge = wrap.querySelector('.thumb-meta');
+  // Deliberately the item's OWN description, not the effective one. A bank
+  // default artist would otherwise mark every piece in the bank as done, which
+  // is exactly backwards — the point of the badge is finding what still needs
+  // typing, and a piece with an inherited artist and no title still does.
+  const described = !!(item.title || item.artist);
+  metaBadge.classList.toggle('has-meta', described);
+
+  const label = [item.title, item.artist || item.effective?.artist].filter(Boolean);
+  metaBadge.title = described ? label.join(' — ')
+    : label.length ? `${label.join(' — ')} (inherited) — no title yet`
+    : 'Not described yet';
+}
+
+// Targeted patch of one thumbnail, following refreshCountLabel. Re-rendering the
+// grid instead would re-run video frame capture for every video in the bank.
+function refreshThumb(item) {
+  const wrap = document.querySelector(`.thumb-item[data-item-id="${item.id}"]`);
+  if (!wrap) return;
+  wrap.classList.toggle('enabled', item.enabled);
+  wrap.classList.toggle('disabled', !item.enabled);
+  wrap.querySelector('.thumb-toggle').textContent = item.enabled ? '✓' : '';
+  paintThumbBadges(wrap, item);
 }
 
 // ── Video frame capture ───────────────────────────────────────────────────────
@@ -1019,16 +1287,6 @@ async function toggleItem(bankName, item, wrap, toggleEl) {
   }
 }
 
-const FIT_CYCLE = ['', 'blur-bg', 'contain', 'cover', 'ken-burns'];
-async function cycleFit(bankName, item, wrap, fitBadge) {
-  const idx = FIT_CYCLE.indexOf(item.fit || '');
-  const next = FIT_CYCLE[(idx + 1) % FIT_CYCLE.length];
-  if (await patchItem(item, { fit: next || null })) {
-    fitBadge.textContent = next ? FIT_LABELS[next] : '·';
-    toast(next ? `Fit: ${next}` : 'Fit: bank default');
-  }
-}
-
 async function setBankDefaultFit(bankName, fit) {
   try {
     await api.patch(`/api/banks/${encodeURIComponent(bankName)}`, { defaultFit: fit || null });
@@ -1046,6 +1304,149 @@ function refreshCountLabel(bankName) {
   const countEl = card.querySelector('.bank-count');
   if (countEl) countEl.textContent = `${enabled} / ${b.items.length}`;
 }
+
+// ── Modal plumbing ────────────────────────────────────────────────────────────
+const openModal = id => document.getElementById(id).classList.add('open');
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+  // Only one modal is ever open, so clearing all three here means no path can
+  // leave a stale editing target behind.
+  editingVibeId = null;
+  editingItemId = null;
+  editingBankName = null;
+  // A library change that arrived while the form was open was deferred rather
+  // than pulling the ground out from under an edit in progress.
+  if (libraryDirty) refreshLibrary();
+}
+
+// Close on backdrop tap for every modal, without wiring each one by hand.
+document.querySelectorAll('.modal-backdrop').forEach(bd => {
+  bd.addEventListener('click', e => { if (e.target === bd) closeModal(bd.id); });
+});
+
+function fillFitSelect(sel, inheritLabel) {
+  sel.innerHTML = '';
+  FIT_OPTS.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.value === '' ? inheritLabel : o.label;
+    sel.appendChild(opt);
+  });
+}
+
+function setSegmented(container, value) {
+  const buttons = [...container.querySelectorAll('button')];
+  buttons.forEach(b => {
+    b.classList.toggle('on', (b.dataset.value || '') === (value || ''));
+    b.onclick = () => { buttons.forEach(x => x.classList.remove('on')); b.classList.add('on'); };
+  });
+}
+const segmentedValue = container => container.querySelector('button.on')?.dataset.value || null;
+
+const fieldValue = id => document.getElementById(id).value.trim() || null;
+
+// ── Item metadata editor ──────────────────────────────────────────────────────
+function openItemModal(item) {
+  editingItemId = item.id;
+  document.getElementById('item-filename').textContent = `${item.bank} / ${item.name}`;
+
+  const preview = document.getElementById('item-preview');
+  if (item.type === 'image') { preview.src = item.file; preview.style.display = ''; }
+  else { preview.removeAttribute('src'); preview.style.display = 'none'; }
+
+  // The item's OWN values, not the effective ones — so a blank field means
+  // "inherit from the bank" rather than silently baking the default in on save.
+  document.getElementById('item-title').value = item.title || '';
+  document.getElementById('item-artist').value = item.artist || '';
+  document.getElementById('item-year').value = item.year || '';
+  document.getElementById('item-medium').value = item.medium || '';
+  document.getElementById('item-source').value = item.source || '';
+
+  const inherited = item.effective?.artist;
+  document.getElementById('item-artist-hint').textContent =
+    !item.artist && inherited ? `Inheriting “${inherited}” from the bank` : '';
+
+  const fitSel = document.getElementById('item-fit');
+  fillFitSelect(fitSel, `— bank default${item.effective?.fit ? ` (${item.effective.fit})` : ''} —`);
+  fitSel.value = item.fit || '';
+
+  document.getElementById('item-enabled').classList.toggle('on', item.enabled);
+  openModal('item-backdrop');
+}
+
+document.getElementById('item-enabled').onclick = function () { this.classList.toggle('on'); };
+document.getElementById('item-cancel').onclick = () => closeModal('item-backdrop');
+
+document.getElementById('item-save').onclick = async () => {
+  const item = findItem(editingItemId);
+  if (!item) return closeModal('item-backdrop');
+
+  try {
+    const { item: updated } = await api.patch(`/api/items/${item.id}`, {
+      title: fieldValue('item-title'),
+      artist: fieldValue('item-artist'),
+      year: fieldValue('item-year'),
+      medium: fieldValue('item-medium'),
+      source: fieldValue('item-source'),
+      fit: document.getElementById('item-fit').value || null,
+      enabled: document.getElementById('item-enabled').classList.contains('on'),
+    });
+    Object.assign(item, updated);
+  } catch {
+    return;   // toasted; leave the form open so the typing isn't lost
+  }
+
+  refreshThumb(item);
+  refreshCountLabel(item.bank);
+  refreshArtists();
+  editingItemId = null;
+  closeModal('item-backdrop');
+  toast('Saved');
+};
+
+// ── Bank settings ─────────────────────────────────────────────────────────────
+function openBankModal(bank) {
+  editingBankName = bank.name;
+  document.getElementById('bank-modal-title').textContent = bank.name;
+  setSegmented(document.getElementById('bank-kind'), bank.kind || 'inspiration');
+  setSegmented(document.getElementById('bank-caption'), bank.captionMode || '');
+
+  fillFitSelect(document.getElementById('bank-fit'), '— global default —');
+  document.getElementById('bank-fit').value = bank.defaultFit || '';
+  document.getElementById('bank-artist').value = bank.defaultArtist || '';
+  document.getElementById('bank-year').value = bank.defaultYear || '';
+  document.getElementById('bank-medium').value = bank.defaultMedium || '';
+  document.getElementById('bank-source').value = bank.defaultSource || '';
+  openModal('bank-backdrop');
+}
+
+document.getElementById('bank-cancel').onclick = () => closeModal('bank-backdrop');
+
+document.getElementById('bank-save').onclick = async () => {
+  const bank = banks.find(b => b.name === editingBankName);
+  if (!bank) return closeModal('bank-backdrop');
+
+  const body = {
+    kind: segmentedValue(document.getElementById('bank-kind')) || 'inspiration',
+    captionMode: segmentedValue(document.getElementById('bank-caption')),
+    defaultFit: document.getElementById('bank-fit').value || null,
+    defaultArtist: fieldValue('bank-artist'),
+    defaultYear: fieldValue('bank-year'),
+    defaultMedium: fieldValue('bank-medium'),
+    defaultSource: fieldValue('bank-source'),
+  };
+
+  try { await api.patch(`/api/banks/${encodeURIComponent(bank.name)}`, body); } catch { return; }
+
+  // Bank defaults change what every item in it inherits, so the whole card is stale.
+  banks = await api.get('/api/banks');
+  await refreshArtists();
+  editingBankName = null;
+  closeModal('bank-backdrop');
+  renderBanks();
+  toast(`Saved: ${bank.name}`);
+};
 
 // ── Vibe membership ───────────────────────────────────────────────────────────
 async function toggleBankInVibe(bankName, vibeId, tagEl) {
@@ -1216,11 +1617,7 @@ document.getElementById('shuffle-toggle').onclick = function() { this.classList.
 
 document.getElementById('vibe-cancel-btn').onclick = () => closeVibeModal();
 
-function closeVibeModal() {
-  document.getElementById('modal-backdrop').classList.remove('open');
-  editingVibeId = null;
-  if (libraryDirty) refreshLibrary();
-}
+const closeVibeModal = () => closeModal('modal-backdrop');
 
 document.getElementById('vibe-save-btn').onclick = async () => {
   const name = document.getElementById('vibe-name-input').value.trim();
@@ -1267,9 +1664,6 @@ document.getElementById('vibe-delete-btn').onclick = async () => {
   toast(`Deleted: ${name}`);
 };
 
-document.getElementById('modal-backdrop').onclick = e => {
-  if (e.target === document.getElementById('modal-backdrop')) closeVibeModal();
-};
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
 function connectSSE() {

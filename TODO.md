@@ -12,12 +12,13 @@ Ordered roughly by how much each unblocks that goal.
 The display CSS is orientation-agnostic, so it *works* at 1080×1920 — but the defaults
 were chosen for landscape and look wrong in a 9:16 frame.
 
-- [ ] **Make `blur-bg` the real default.** At `contain`, a 3:2 landscape photo fills only
-      ~37% of a 1080×1920 screen — two thirds of the wall is black bars. `blur-bg` is the
-      only fit that reads well for mixed-aspect content in portrait.
-- [ ] **Fix the `studio` vibe's stale key.** [vibes.json](vibes.json) sets `objectFit`,
-      but the server ([server.js:218](server.js#L218)) and admin UI both read `defaultFit`
-      — so that `contain` setting does nothing right now. One-word fix.
+- [x] **`blur-bg` is the default.** At `contain`, a 3:2 landscape photo fills only ~37% of a
+      1080×1920 screen — two thirds of the wall is black bars.
+- [x] **Fixed the stale `objectFit` key**, permanently: the migration reads both, so the
+      `studio` vibe now actually applies `contain` where it had always silently fallen back.
+- [x] **Fit is reachable on a phone.** It was bound to shift-click and `oncontextmenu` only
+      — neither exists on touch, and the phone is the primary control surface. Cycling is
+      gone; both thumbnail badges open the item editor, which has a proper fit select.
 - [ ] **Orientation-aware Ken Burns.** The current keyframes
       ([index.html:62-67](public/index.html#L62-L67)) are zoom + *vertical* drift. On a
       portrait screen a landscape source is cropped hard on the sides — a slow *horizontal*
@@ -34,12 +35,15 @@ Right now the only on-screen text is the bank/vibe name
 ([index.html:249](public/index.html#L249)). If the wall is showing work that inspires me,
 it needs to credit whoever made it — both as basic courtesy and so I remember who it was.
 
-- [ ] **Per-item metadata:** `title`, `artist`, `year`, `source` (URL). `media-config.json`
-      already has a per-item slot (`banks[bank].items[file]`) — extend it there.
+- [x] **Per-item metadata:** `title`, `artist`, `year`, `medium`, `source`. Editor behind
+      either thumbnail badge, with artist autocomplete so the same person is spelled the
+      same way — which matters once "everything by X" is a playlist source.
+- [x] **Bank-level defaults** that items inherit, for a bank that's all one artist. The
+      editor shows the item's own value with the inherited one as a hint, so saving a piece
+      never silently bakes the bank default into it.
 - [ ] **Caption rendering** on the display: discreet, bottom-aligned, fades like the
       existing label. Show artist prominently for inspiration; title-only for my own work.
-- [ ] **Mark banks as `mine` vs `inspiration`** so the caption style can differ, and so a
-      vibe can't accidentally mix them when I don't want it to.
+- [x] **Mark banks as `mine` vs `inspiration`** so the caption style can differ.
 - [ ] **Capture provenance at upload time.** A source URL typed months later is a source URL
       never typed. Prompt for it in the drop-zone flow.
 
