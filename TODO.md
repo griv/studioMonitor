@@ -115,7 +115,7 @@ It's a device on a wall, not a page I'm babysitting. Failures need to be self-he
 
 ## 8. Housekeeping
 
-- [ ] **README** — what it is, how to run it, how banks and vibes relate.
+- [x] **README** — what it is, how to run it, how banks and vibes relate.
 - [ ] **Validate `:name` on bank/vibe routes.** `SAFE_NAME` guards uploads
       ([server.js:115](server.js#L115)) but not
       [`/api/bank/:name`](server.js#L186) — it only ever reaches `readdirSync`, so the
