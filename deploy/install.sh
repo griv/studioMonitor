@@ -47,18 +47,13 @@ step "Dependencies"
 cd "$REPO_DIR"
 npm ci --omit=dev
 
-step "Runtime config"
-# These are gitignored device state; seed them once, then leave them alone so
-# `git pull` never fights with what the admin UI has written.
-for f in vibes media-config; do
-  if [ -f "$f.json" ]; then
-    echo "    $f.json exists, leaving it"
-  else
-    cp "$f.example.json" "$f.json"
-    echo "    seeded $f.json"
-  fi
-done
-mkdir -p media
+step "Runtime directories"
+# data/ holds the SQLite library (plus its WAL sidecars); media/ holds the banks.
+# Both are gitignored device state, so `git pull` never fights with them. The
+# .example JSON files are reference only — the database is created on first run,
+# and any pre-SQLite vibes.json / media-config.json is imported automatically.
+mkdir -p data media
+echo "    data/ media/"
 
 # ── Server on boot ──────────────────────────────────────────────────────────
 step "systemd service"
