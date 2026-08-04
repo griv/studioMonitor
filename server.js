@@ -63,6 +63,10 @@ let state = {
     captionHoldMs: 6000,
   },
   libraryVersion: 0,
+  // Bumped on every explicit bank/vibe selection, including re-selecting the one
+  // already playing. The display keys its collection caption off this rather than
+  // off the name — tapping Play is a request for something to happen.
+  collectionEpoch: 0,
 };
 
 const clients = new Set();
@@ -298,6 +302,7 @@ app.post('/api/bank/:name', (req, res) => {
   state.currentBank = name;
   state.currentVibe = null;
   state.mediaList = items;
+  state.collectionEpoch++;
   broadcast();
   res.json({ ok: true, state });
 });
@@ -316,6 +321,7 @@ app.post('/api/vibe/:name', (req, res) => {
   state.currentVibe = vibe.name;
   state.currentBank = null;
   state.mediaList = items;
+  state.collectionEpoch++;
   state.settings = {
     ...state.settings,
     dwellTime: vibe.dwellTime ?? state.settings.dwellTime,
@@ -327,6 +333,13 @@ app.post('/api/vibe/:name', (req, res) => {
   };
   broadcast();
   res.json({ ok: true, state, unresolved });
+});
+
+// Flash the caption for whatever is on the wall right now, without changing the
+// caption mode. Not part of `state` — it's a one-shot event, not a fact.
+app.post('/api/caption/reveal', (req, res) => {
+  clients.forEach(r => r.write('event: reveal\ndata: {}\n\n'));
+  res.json({ ok: true, clients: clients.size });
 });
 
 app.post('/api/settings', validated(SETTINGS_SPEC, (req, res, fields) => {

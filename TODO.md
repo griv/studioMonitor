@@ -41,8 +41,9 @@ it needs to credit whoever made it — both as basic courtesy and so I remember 
 - [x] **Bank-level defaults** that items inherit, for a bank that's all one artist. The
       editor shows the item's own value with the inherited one as a hint, so saving a piece
       never silently bakes the bank default into it.
-- [ ] **Caption rendering** on the display: discreet, bottom-aligned, fades like the
-      existing label. Show artist prominently for inspiration; title-only for my own work.
+- [x] **Caption rendering** — bottom of frame over a scrim, sized for the panel rather
+      than for a laptop, three modes, plus a reveal button so a hidden caption is still
+      summonable from the phone.
 - [x] **Mark banks as `mine` vs `inspiration`** so the caption style can differ.
 - [ ] **Capture provenance at upload time.** A source URL typed months later is a source URL
       never typed. Prompt for it in the drop-zone flow.
@@ -52,7 +53,10 @@ it needs to credit whoever made it — both as basic courtesy and so I remember 
 There are none — no pause, no skip, no back. For a studio wall this is the thing I'll want
 most: something good comes up and I want to hold it, or a dud appears and I want it gone.
 
+- [x] `POST /api/caption/reveal` and a **Caption** button in the header — the "what is
+      that?" half of this. The transport half is still missing.
 - [ ] `POST /api/next`, `/api/prev`, `/api/pause` (toggle) driving the display over SSE.
+      The SSE one-shot event pattern used by reveal is the shape to copy.
 - [ ] Big tap targets for them in the admin header, above the fold.
 - [ ] **"Hold this"** — pin the current item indefinitely until unpinned.
 - [ ] **"Not this one"** — disable the current item from the display, one tap, no hunting
@@ -74,10 +78,10 @@ It's a device on a wall, not a page I'm babysitting. Failures need to be self-he
       on every chokidar event, so each file touch — and attribution editing is write-heavy —
       jumped the wall back to the start in a new random order. Surviving items now keep
       their position and new ones are appended.
-- [ ] **Stop restarting the slideshow on every change** (client half). `applyState`
-      ([index.html:260](public/index.html#L260)) resets to index 0 whenever the media list
-      differs. Metadata-only edits no longer change it, but an upload still restarts the
-      show. Preserve position where the current item still exists.
+- [x] **Stop restarting the slideshow on every change.** `applyState` kept its position
+      where the piece on screen survives the change, and repaints the caption in place when
+      only attribution changed — otherwise you type an artist name, see nothing happen, and
+      conclude it didn't work.
 - [ ] Client-side watchdog: if no slide has advanced in ~5 min, reload the page.
 
 ## 5. Kiosk / deployment
@@ -95,10 +99,10 @@ Target box: ASUS GR6 mini PC, Xubuntu. See [deploy/README.md](deploy/README.md).
       1080×1920 on decade-old hardware is fine on the GPU and painful on llvmpipe.
 - [ ] **Scheduled on/off** via Home Assistant — dark overnight. Saves the panel and stops
       the studio glowing at 3am.
-- [ ] **Burn-in mitigation.** A static image on a panel for hours is the risk case. Cap the
-      max dwell time, and consider a few-pixel periodic shift of the whole stage. (The
-      auto-hiding label at [index.html:253](public/index.html#L253) already avoids the worst
-      offender — persistent static UI.)
+- [x] **Pixel drift** — the whole frame, caption included, shifts within ±12px every ~7
+      minutes with a 4s transition. Invisible in motion, costs nothing.
+- [ ] **Establish the panel type.** If it's IPS LCD, retention is mild and temporary and
+      the drift is enough. Only OLED justifies treating `always` captions as a risk.
 
 ## 6. Ingest pipeline
 

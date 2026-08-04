@@ -57,6 +57,7 @@
       transition: border-color 0.2s, color 0.2s;
     }
     .display-link:hover { border-color: var(--border-hi); color: var(--text); }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
 
     /* ── Now playing ── */
     #now-playing {
@@ -617,7 +618,11 @@
 
   <header>
     <h1>Studio Monitor</h1>
-    <a class="display-link" href="/" target="_blank">Display ↗</a>
+    <div class="header-actions">
+      <button class="btn small" id="reveal-btn" title="Show the caption on the wall now">Caption</button>
+      <button class="btn icon" id="settings-btn" title="Display settings">⚙</button>
+      <a class="display-link" href="/" target="_blank">Display ↗</a>
+    </div>
   </header>
 
   <div id="now-playing">
@@ -798,6 +803,62 @@
       <span class="spacer"></span>
       <button class="btn small" id="bank-cancel">Cancel</button>
       <button class="btn primary small" id="bank-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Display settings -->
+<div id="settings-backdrop" class="modal-backdrop">
+  <div class="modal">
+    <h3>Display</h3>
+    <div class="modal-sub">Applies to the wall now. A vibe overrides these when it starts.</div>
+
+    <div class="field">
+      <label>Caption</label>
+      <div class="segmented" id="set-caption">
+        <button data-value="collection">On change</button>
+        <button data-value="item">Each piece</button>
+        <button data-value="always">Always</button>
+      </div>
+      <div class="inherit-hint" id="set-caption-hint"></div>
+    </div>
+    <div class="field">
+      <label>Caption hold</label>
+      <div class="range-row">
+        <input type="range" id="set-hold" min="2000" max="30000" step="500">
+        <span class="range-val" id="set-hold-val">6s</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>Dwell time</label>
+      <div class="range-row">
+        <input type="range" id="set-dwell" min="2000" max="30000" step="500">
+        <span class="range-val" id="set-dwell-val">8s</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>Transition</label>
+      <div class="range-row">
+        <input type="range" id="set-trans" min="500" max="6000" step="250">
+        <span class="range-val" id="set-trans-val">2s</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>Global fit</label>
+      <select id="set-fit" class="fit-select" style="width:100%"></select>
+    </div>
+    <div class="field">
+      <label>Shuffle</label>
+      <div class="toggle-row">
+        <span style="font-size:13px;color:var(--dim)">Randomise order</span>
+        <div id="set-shuffle" class="toggle-switch"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button class="btn small" id="settings-cancel">Cancel</button>
+      <button class="btn primary small" id="settings-save">Save</button>
     </div>
   </div>
 </div>
@@ -1446,6 +1507,90 @@ document.getElementById('bank-save').onclick = async () => {
   closeModal('bank-backdrop');
   renderBanks();
   toast(`Saved: ${bank.name}`);
+};
+
+// ── Display settings ──────────────────────────────────────────────────────────
+// POST /api/settings existed from the start and nothing ever called it.
+
+const secs = ms => `${(ms / 1000).toFixed(1)}s`;
+
+function bindRange(id, onInput) {
+  const input = document.getElementById(id);
+  const out = document.getElementById(`${id}-val`);
+  input.oninput = () => { out.textContent = secs(input.value); onInput?.(); };
+}
+function setRange(id, value) {
+  document.getElementById(id).value = value;
+  document.getElementById(`${id}-val`).textContent = secs(value);
+}
+
+// `item` mode clamps its hold to dwell - 1.5s, or the caption never clears
+// between slides and the mode quietly becomes `always`. Say so rather than
+// letting the slider lie.
+function updateCaptionHint() {
+  const mode = segmentedValue(document.getElementById('set-caption'));
+  const hold = +document.getElementById('set-hold').value;
+  const dwell = +document.getElementById('set-dwell').value;
+  const hint = document.getElementById('set-caption-hint');
+
+  if (mode === 'item' && hold > dwell - 1500) {
+    hint.textContent = `Held ${secs(Math.max(1200, dwell - 1500))} — clamped so it clears before the next piece.`;
+  } else if (mode === 'always') {
+    hint.textContent = 'Permanently on screen. Best for an opening, not for every day.';
+  } else if (mode === 'collection') {
+    hint.textContent = 'Only when the bank or vibe changes. Tap Caption to show it on demand.';
+  } else {
+    hint.textContent = '';
+  }
+}
+
+function openSettingsModal() {
+  const s = displayState.settings || {};
+  setSegmented(document.getElementById('set-caption'), s.captionMode || 'collection');
+  // setSegmented rebinds onclick, so re-attach the hint update after it.
+  document.querySelectorAll('#set-caption button').forEach(b => {
+    const prev = b.onclick;
+    b.onclick = e => { prev(e); updateCaptionHint(); };
+  });
+
+  setRange('set-hold', s.captionHoldMs ?? 6000);
+  setRange('set-dwell', s.dwellTime ?? 8000);
+  setRange('set-trans', s.transitionDuration ?? 2000);
+  fillFitSelect(document.getElementById('set-fit'), '— none (letterbox) —');
+  document.getElementById('set-fit').value = s.objectFit || '';
+  document.getElementById('set-shuffle').classList.toggle('on', !!s.shuffle);
+  updateCaptionHint();
+  openModal('settings-backdrop');
+}
+
+bindRange('set-hold', updateCaptionHint);
+bindRange('set-dwell', updateCaptionHint);
+bindRange('set-trans');
+document.getElementById('set-shuffle').onclick = function () { this.classList.toggle('on'); };
+document.getElementById('settings-btn').onclick = openSettingsModal;
+document.getElementById('settings-cancel').onclick = () => closeModal('settings-backdrop');
+
+document.getElementById('settings-save').onclick = async () => {
+  try {
+    const { settings } = await api.post('/api/settings', {
+      captionMode: segmentedValue(document.getElementById('set-caption')) || 'collection',
+      captionHoldMs: +document.getElementById('set-hold').value,
+      dwellTime: +document.getElementById('set-dwell').value,
+      transitionDuration: +document.getElementById('set-trans').value,
+      objectFit: document.getElementById('set-fit').value || null,
+      shuffle: document.getElementById('set-shuffle').classList.contains('on'),
+    });
+    displayState.settings = settings;
+  } catch { return; }
+  closeModal('settings-backdrop');
+  toast('Display updated');
+};
+
+document.getElementById('reveal-btn').onclick = async () => {
+  try {
+    const { clients } = await api.post('/api/caption/reveal');
+    toast(clients ? 'Caption shown on the wall' : 'No display connected');
+  } catch { /* toasted */ }
 };
 
 // ── Vibe membership ───────────────────────────────────────────────────────────

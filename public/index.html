@@ -78,21 +78,64 @@
       transform-origin: center center;
     }
 
-    /* ── label ── */
-    #label {
+    /* ── caption ── */
+    /* Sized for a 1080×1920 panel read from across a studio, not for a laptop.
+       1080px across ~300mm is ~3.6px/mm, so legibility at 2–4m wants roughly 40px
+       type. Discretion comes from opacity and colour, not from being small. */
+    #caption {
       position: fixed;
-      bottom: 24px;
-      left: 0; right: 0;
-      text-align: center;
-      color: rgba(255,255,255,0.22);
-      font-family: system-ui, sans-serif;
-      font-size: 10px;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
+      left: 0; right: 0; bottom: 0;
+      min-height: 18vh;
+      display: flex;
+      align-items: flex-end;
+      padding: 0 6vw 5vh;
+      z-index: 10;
       pointer-events: none;
+      font-family: system-ui, -apple-system, sans-serif;
       transition: opacity 1.2s ease;
     }
-    #label.hidden { opacity: 0; }
+    #caption.hidden { opacity: 0; }
+
+    /* White text over an arbitrary photograph is unreadable without a scrim. */
+    #caption::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      background: linear-gradient(to top, rgba(0,0,0,0.72), rgba(0,0,0,0));
+    }
+
+    #caption-inner { width: 100%; transition: opacity 0.2s ease; }
+
+    .cap-primary {
+      font-size: clamp(14px, 2.6vw, 34px);
+      /* never #fff — lower duty cycle on the subpixels */
+      color: rgba(255,255,255,0.82);
+      line-height: 1.25;
+    }
+    .cap-secondary {
+      font-size: clamp(11px, 1.7vw, 22px);
+      color: rgba(255,255,255,0.5);
+      line-height: 1.35;
+      margin-top: 0.35em;
+    }
+    .cap-collection {
+      font-size: clamp(9px, 1.05vw, 14px);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.26);
+      margin-top: 0.9em;
+    }
+    .cap-secondary:empty, .cap-collection:empty { display: none; }
+
+    /* ── Burn-in drift ── */
+    /* Nudges the whole frame a few pixels every several minutes. Free, invisible
+       in motion, and it covers the caption too — which is the only genuinely
+       static element when caption mode is `always`. */
+    #stage, #caption {
+      transform: translate(var(--drift-x, 0px), var(--drift-y, 0px));
+      transition: transform 4s ease-in-out;
+    }
 
     #empty {
       display: none;
@@ -111,12 +154,19 @@
 </head>
 <body>
   <div id="stage"></div>
-  <div id="label" class="hidden"></div>
+  <div id="caption" class="hidden">
+    <div id="caption-inner">
+      <div class="cap-primary"></div>
+      <div class="cap-secondary"></div>
+      <div class="cap-collection"></div>
+    </div>
+  </div>
   <div id="empty">No media loaded</div>
 
   <script>
     const stage = document.getElementById('stage');
-    const labelEl = document.getElementById('label');
+    const captionEl = document.getElementById('caption');
+    const captionInner = document.getElementById('caption-inner');
     const emptyEl = document.getElementById('empty');
 
     const KB_ANIMS = ['kb-zoom-in-r','kb-zoom-in-l','kb-zoom-out-r','kb-zoom-out-l','kb-drift-up','kb-drift-dn'];
@@ -126,7 +176,115 @@
     let currentIndex = 0;
     let timer = null;
     let activeSlide = null;
-    let labelTimer = null;
+    let captionTimer = null;
+    let collectionCaptionDue = false;
+
+    // ── Caption ─────────────────────────────────────────────────────────────
+
+    const collectionName = () =>
+      (state?.currentVibe || state?.currentBank || '').replace(/[-_]/g, ' ');
+
+    // What to say about a piece. Emphasis follows the bank: work that inspires me
+    // credits the maker first; my own work leads with the title.
+    function captionFor(item) {
+      const collection = collectionName();
+      if (!item) return collection ? { primary: collection } : null;
+
+      const { artist, title, year, medium, bankKind } = item;
+      if (!artist && !title) return collection ? { primary: collection } : null;
+
+      if (bankKind === 'mine') {
+        return {
+          primary: title || artist,
+          secondary: [year, medium].filter(Boolean).join(' · '),
+          collection,
+        };
+      }
+
+      if (artist) {
+        return {
+          primary: artist,
+          secondary: [[title, year].filter(Boolean).join(', '), medium].filter(Boolean).join(' · '),
+          collection,
+        };
+      }
+      return { primary: title, secondary: [year, medium].filter(Boolean).join(' · '), collection };
+    }
+
+    function paintCaption(item) {
+      const cap = captionFor(item);
+      if (!cap) return false;
+      captionInner.querySelector('.cap-primary').textContent = cap.primary || '';
+      captionInner.querySelector('.cap-secondary').textContent = cap.secondary || '';
+      // Don't repeat the collection when it's already the headline.
+      captionInner.querySelector('.cap-collection').textContent =
+        cap.collection && cap.collection !== cap.primary ? cap.collection : '';
+      return true;
+    }
+
+    // hold === null keeps it up indefinitely.
+    function showCaption(item, hold) {
+      if (!paintCaption(item)) return;
+      captionEl.classList.remove('hidden');
+      clearTimeout(captionTimer);
+      if (hold != null) captionTimer = setTimeout(() => captionEl.classList.add('hidden'), hold);
+    }
+
+    // Repaint without changing visibility — for when attribution was edited while
+    // the same piece is on screen.
+    function repaintIfVisible(item) {
+      if (!captionEl.classList.contains('hidden')) paintCaption(item);
+    }
+
+    function captionOnSlide(item) {
+      const mode = state.settings.captionMode || 'collection';
+      const hold = state.settings.captionHoldMs ?? 6000;
+      const due = collectionCaptionDue;
+      collectionCaptionDue = false;   // consumed whatever the mode, so it can't fire later
+
+      if (mode === 'always') {
+        // Swap the text at the midpoint of a short fade rather than snapping.
+        captionInner.style.opacity = '0';
+        setTimeout(() => { paintCaption(item); captionInner.style.opacity = '1'; }, 200);
+        captionEl.classList.remove('hidden');
+        clearTimeout(captionTimer);
+        return;
+      }
+
+      if (mode === 'item') {
+        // Clamp, or the caption never clears between slides and `item` silently
+        // degrades into `always`.
+        showCaption(item, Math.max(1200, Math.min(hold, state.settings.dwellTime - 1500)));
+        return;
+      }
+
+      // collection: only when the collection identity actually changed.
+      if (due) showCaption(item, hold);
+      else repaintIfVisible(item);
+    }
+
+    // Changing the mode has to take effect now, not at the next slide — otherwise
+    // switching away from `always` leaves the caption stranded on the wall for a
+    // whole dwell, which reads as the setting not working.
+    function applyCaptionMode(item) {
+      clearTimeout(captionTimer);
+      captionInner.style.opacity = '1';
+      if ((state.settings.captionMode || 'collection') === 'always') {
+        paintCaption(item);
+        captionEl.classList.remove('hidden');
+      } else {
+        // `item` captions the next piece; `collection` waits for a change or a reveal.
+        captionEl.classList.add('hidden');
+      }
+    }
+
+    // ── Burn-in drift ───────────────────────────────────────────────────────
+    function driftTick() {
+      const s = document.documentElement.style;
+      s.setProperty('--drift-x', `${(Math.random() * 24 - 12).toFixed(1)}px`);
+      s.setProperty('--drift-y', `${(Math.random() * 24 - 12).toFixed(1)}px`);
+    }
+    setInterval(driftTick, 7 * 60 * 1000);
 
     // ── Slide builders ──────────────────────────────────────────────────────
 
@@ -245,12 +403,7 @@
         timer = setTimeout(advance, state.settings.dwellTime);
       }
 
-      // Label
-      const label = state.currentVibe || state.currentBank || '';
-      labelEl.textContent = label.replace(/[-_]/g, ' ');
-      labelEl.classList.remove('hidden');
-      clearTimeout(labelTimer);
-      labelTimer = setTimeout(() => labelEl.classList.add('hidden'), 4000);
+      captionOnSlide(item);
     }
 
     function advance() { showItem(currentIndex + 1); }
@@ -260,13 +413,45 @@
     function applyState(newState) {
       const prevFiles = state ? state.mediaList.map(m => m.file).join() : '';
       const nextFiles = newState.mediaList.map(m => m.file).join();
-      const changed = prevFiles !== nextFiles;
+      const listChanged = prevFiles !== nextFiles;
+
+      const prevEpoch = state?.collectionEpoch;
+      const prevMode = state?.settings?.captionMode;
+      const onScreen = state?.mediaList[currentIndex]?.file;
+
       state = newState;
-      if (changed || !activeSlide) {
-        clearTimeout(timer);
-        currentIndex = 0;
-        showItem(0);
+      // Epoch, not name: re-selecting the bank already playing is still a request
+      // for something to happen.
+      if (newState.collectionEpoch !== prevEpoch) collectionCaptionDue = true;
+
+      if (!activeSlide) { clearTimeout(timer); currentIndex = 0; showItem(0); return; }
+
+      if (state.settings.captionMode !== prevMode) {
+        applyCaptionMode(state.mediaList[currentIndex]);
       }
+
+      if (!listChanged) {
+        // Same files, different payload — an attribution edit. Restarting here
+        // would be wrong, but so is leaving a stale caption on the wall: you'd
+        // type an artist name, see nothing change, and conclude it didn't work.
+        if (collectionCaptionDue) captionOnSlide(state.mediaList[currentIndex]);
+        else repaintIfVisible(state.mediaList[currentIndex]);
+        return;
+      }
+
+      // The list changed. If what's on screen survived, keep showing it and carry
+      // on from there rather than snapping back to the first image.
+      const stillThere = state.mediaList.findIndex(m => m.file === onScreen);
+      if (stillThere >= 0) {
+        currentIndex = stillThere;
+        if (collectionCaptionDue) captionOnSlide(state.mediaList[stillThere]);
+        else repaintIfVisible(state.mediaList[stillThere]);
+        return;
+      }
+
+      clearTimeout(timer);
+      currentIndex = 0;
+      showItem(0);
     }
 
     fetch('/api/status').then(r => r.json()).then(applyState).catch(console.error);
@@ -274,6 +459,14 @@
     function connectSSE() {
       const es = new EventSource('/api/events');
       es.addEventListener('state', e => { try { applyState(JSON.parse(e.data)); } catch {} });
+
+      // "I like that — what is it?" With the caption hidden by default, this is
+      // the answer that doesn't involve walking over to the machine.
+      es.addEventListener('reveal', () => {
+        const item = state?.mediaList[currentIndex];
+        if (item) showCaption(item, state.settings.captionHoldMs ?? 6000);
+      });
+
       es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };
     }
     connectSSE();

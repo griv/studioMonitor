@@ -116,8 +116,27 @@ Resolved most-specific-first: **per item → bank default → session setting �
 
 Images advance after `dwellTime` (default 8 s), cross-fading over `transitionDuration`
 (default 2 s). Videos play muted and advance when they end, with a 90 s fallback. A broken
-file skips itself rather than stalling the wall. The bank/vibe name appears briefly on each
-change, then fades out — nothing static is left burning into the panel.
+file skips itself rather than stalling the wall.
+
+### Captions
+
+Bottom of the frame, over a gradient scrim, sized for a 1080×1920 panel read from across a
+room — roughly 28 px for the headline, not the 10 px a laptop would suggest. Emphasis
+follows the bank's kind: `inspiration` credits the artist first, `mine` leads with the title.
+
+| Mode | Behaviour |
+|---|---|
+| `collection` | Appears when the bank or vibe changes, holds, fades. The default — the wall stays pure image. |
+| `item` | Appears for every piece. Its hold is clamped to `dwellTime - 1.5 s`, or it never clears and quietly becomes `always`. |
+| `always` | Permanently on screen. For an opening or a visitor, not for every day. |
+
+`POST /api/caption/reveal` — the **Caption** button in the admin header — flashes the
+caption for whatever is on the wall right now, without changing the mode. With
+`collection` as the default, that's the answer to "I like that, what is it?"
+
+Every few minutes the whole frame, caption included, shifts a few pixels. It's invisible in
+motion and it's the cheap half of burn-in mitigation; the other half is not leaving
+`always` on all day.
 
 ## Admin
 
