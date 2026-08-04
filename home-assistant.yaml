@@ -1,0 +1,65 @@
+# ── configuration.yaml additions ────────────────────────────────────────────
+
+rest_command:
+  studio_set_bank:
+    url: "http://UBUNTU_IP:3000/api/bank/{{ bank }}"
+    method: POST
+
+  studio_set_vibe:
+    url: "http://UBUNTU_IP:3000/api/vibe/{{ vibe }}"
+    method: POST
+
+  studio_set_settings:
+    url: "http://UBUNTU_IP:3000/api/settings"
+    method: POST
+    content_type: application/json
+    payload: "{{ payload }}"
+
+input_select:
+  studio_monitor_bank:
+    name: Studio Monitor — Bank
+    options:
+      - invisibleOutfields
+      # add more banks here as you create them
+    icon: mdi:image-multiple
+
+  studio_monitor_vibe:
+    name: Studio Monitor — Vibe
+    options:
+      - studio
+      # add more vibes here as you define them in vibes.json
+    icon: mdi:palette
+
+
+# ── automations.yaml additions ───────────────────────────────────────────────
+
+- alias: Studio Monitor — switch bank from input_select
+  trigger:
+    - platform: state
+      entity_id: input_select.studio_monitor_bank
+  action:
+    - service: rest_command.studio_set_bank
+      data:
+        bank: "{{ states('input_select.studio_monitor_bank') }}"
+
+- alias: Studio Monitor — switch vibe from input_select
+  trigger:
+    - platform: state
+      entity_id: input_select.studio_monitor_vibe
+  action:
+    - service: rest_command.studio_set_vibe
+      data:
+        vibe: "{{ states('input_select.studio_monitor_vibe') }}"
+
+
+# ── lovelace card (dashboard YAML) ───────────────────────────────────────────
+#
+# type: entities
+# title: Studio Monitor
+# entities:
+#   - entity: input_select.studio_monitor_vibe
+#     name: Vibe
+#   - entity: input_select.studio_monitor_bank
+#     name: Bank (direct)
+#
+# Or use button-card / mushroom-entity for a nicer phone UI.

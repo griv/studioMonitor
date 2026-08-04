@@ -1,0 +1,12 @@
+{
+  "vibes": [
+    {
+      "name": "studio",
+      "banks": ["invisibleOutfields"],
+      "dwellTime": 8000,
+      "transitionDuration": 2000,
+      "shuffle": false,
+      "objectFit": "contain"
+    }
+  ]
+}

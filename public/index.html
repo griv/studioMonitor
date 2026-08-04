@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Studio Monitor</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #000;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      cursor: none;
+    }
+
+    #stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ── Base slide ── */
+    .slide {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .slide.active { opacity: 1; }
+
+    /* ── contain / cover ── */
+    .slide img.main, .slide video.main {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* ── blur-bg: blurred cover layer + contained foreground ── */
+    .slide .blur-layer {
+      position: absolute;
+      inset: -5%;  /* oversized to hide blur edges */
+      width: 110%;
+      height: 110%;
+      object-fit: cover;
+      filter: blur(28px) brightness(0.35) saturate(0.7);
+      display: block;
+    }
+    .slide .fg-layer {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    /* ── Ken Burns animations ── */
+    @keyframes kb-zoom-in-r  { from { transform: scale(1.00) translate( 0%,  0%); } to { transform: scale(1.08) translate(-2%, -1%); } }
+    @keyframes kb-zoom-in-l  { from { transform: scale(1.00) translate( 0%,  0%); } to { transform: scale(1.08) translate( 2%,  1%); } }
+    @keyframes kb-zoom-out-r { from { transform: scale(1.08) translate(-2%, -1%); } to { transform: scale(1.00) translate( 0%,  0%); } }
+    @keyframes kb-zoom-out-l { from { transform: scale(1.08) translate( 2%,  1%); } to { transform: scale(1.00) translate( 0%,  0%); } }
+    @keyframes kb-drift-up   { from { transform: scale(1.06) translate( 0%,  2%); } to { transform: scale(1.06) translate( 0%, -2%); } }
+    @keyframes kb-drift-dn   { from { transform: scale(1.06) translate( 0%, -2%); } to { transform: scale(1.06) translate( 0%,  2%); } }
+
+    .kb-wrap {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+    .kb-wrap img, .kb-wrap video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover; /* cover fills frame, motion does the rest */
+      transform-origin: center center;
+    }
+
+    /* ── label ── */
+    #label {
+      position: fixed;
+      bottom: 24px;
+      left: 0; right: 0;
+      text-align: center;
+      color: rgba(255,255,255,0.22);
+      font-family: system-ui, sans-serif;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      pointer-events: none;
+      transition: opacity 1.2s ease;
+    }
+    #label.hidden { opacity: 0; }
+
+    #empty {
+      display: none;
+      position: absolute;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,0.12);
+      font-family: system-ui, sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+    #empty.visible { display: flex; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="label" class="hidden"></div>
+  <div id="empty">No media loaded</div>
+
+  <script>
+    const stage = document.getElementById('stage');
+    const labelEl = document.getElementById('label');
+    const emptyEl = document.getElementById('empty');
+
+    const KB_ANIMS = ['kb-zoom-in-r','kb-zoom-in-l','kb-zoom-out-r','kb-zoom-out-l','kb-drift-up','kb-drift-dn'];
+    let kbIndex = 0;
+
+    let state = null;
+    let currentIndex = 0;
+    let timer = null;
+    let activeSlide = null;
+    let labelTimer = null;
+
+    // ── Slide builders ──────────────────────────────────────────────────────
+
+    function makeMediaEl(tag, src, fit) {
+      const el = document.createElement(tag);
+      el.src = src;
+      if (tag === 'video') {
+        el.autoplay = true;
+        el.muted = true;
+        el.playsInline = true;
+        el.loop = false;
+      }
+      el.style.objectFit = fit;
+      return el;
+    }
+
+    function buildSlide(item, globalFit, fadeDuration) {
+      const fit = item.fit || globalFit || 'contain';
+      const slide = document.createElement('div');
+      slide.className = 'slide';
+      slide.style.transition = `opacity ${fadeDuration}ms ease-in-out`;
+      slide.dataset.fit = fit;
+
+      const src = item.file;
+      const tag = item.type === 'video' ? 'video' : 'img';
+
+      if (fit === 'blur-bg' && item.type === 'image') {
+        // Two-layer: blurred bg + contained fg
+        const bg = document.createElement('img');
+        bg.src = src;
+        bg.className = 'blur-layer';
+        bg.alt = '';
+        const fg = document.createElement('img');
+        fg.src = src;
+        fg.className = 'fg-layer';
+        fg.alt = '';
+        fg.addEventListener('error', () => advance(), { once: true });
+        slide.appendChild(bg);
+        slide.appendChild(fg);
+
+      } else if (fit === 'ken-burns') {
+        const anim = KB_ANIMS[kbIndex++ % KB_ANIMS.length];
+        const wrap = document.createElement('div');
+        wrap.className = 'kb-wrap';
+        const el = makeMediaEl(tag, src, 'cover');
+        el.style.animation = `${anim} var(--kb-dur, 12s) ease-in-out forwards`;
+        el.addEventListener('error', () => advance(), { once: true });
+        if (tag === 'video') {
+          el.addEventListener('ended', () => advance(), { once: true });
+        }
+        wrap.appendChild(el);
+        slide.appendChild(wrap);
+
+      } else {
+        // contain or cover
+        const el = makeMediaEl(tag, src, fit === 'cover' ? 'cover' : 'contain');
+        el.className = 'main';
+        el.addEventListener('error', () => advance(), { once: true });
+        if (tag === 'video') {
+          el.addEventListener('ended', () => advance(), { once: true });
+        }
+        slide.appendChild(el);
+      }
+
+      return slide;
+    }
+
+    // ── Playback ────────────────────────────────────────────────────────────
+
+    function showItem(index) {
+      if (!state || !state.mediaList.length) {
+        emptyEl.classList.add('visible');
+        return;
+      }
+      emptyEl.classList.remove('visible');
+
+      currentIndex = ((index % state.mediaList.length) + state.mediaList.length) % state.mediaList.length;
+      const item = state.mediaList[currentIndex];
+      const fadeDuration = state.settings.transitionDuration;
+      const globalFit = state.settings.objectFit || 'contain';
+      const fit = item.fit || globalFit;
+
+      // Update Ken Burns duration from dwell time
+      document.documentElement.style.setProperty('--kb-dur', `${(state.settings.dwellTime + fadeDuration) / 1000}s`);
+
+      const newSlide = buildSlide(item, globalFit, fadeDuration);
+      stage.appendChild(newSlide);
+
+      // Preload next image
+      const next = state.mediaList[(currentIndex + 1) % state.mediaList.length];
+      if (next?.type === 'image') {
+        const pre = new Image();
+        pre.src = next.file;
+      }
+
+      // Fade in
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        newSlide.classList.add('active');
+        if (activeSlide) {
+          const old = activeSlide;
+          old.classList.remove('active');
+          setTimeout(() => old.remove(), fadeDuration + 100);
+        }
+        activeSlide = newSlide;
+      }));
+
+      // Schedule next
+      clearTimeout(timer);
+      const isVideo = item.type === 'video';
+      const isKB    = fit === 'ken-burns';
+
+      if (isVideo && fit !== 'ken-burns') {
+        // video: advance on ended (already wired in buildSlide); fallback timer
+        timer = setTimeout(advance, 90_000);
+      } else {
+        timer = setTimeout(advance, state.settings.dwellTime);
+      }
+
+      // Label
+      const label = state.currentVibe || state.currentBank || '';
+      labelEl.textContent = label.replace(/[-_]/g, ' ');
+      labelEl.classList.remove('hidden');
+      clearTimeout(labelTimer);
+      labelTimer = setTimeout(() => labelEl.classList.add('hidden'), 4000);
+    }
+
+    function advance() { showItem(currentIndex + 1); }
+
+    // ── State management ────────────────────────────────────────────────────
+
+    function applyState(newState) {
+      const prevFiles = state ? state.mediaList.map(m => m.file).join() : '';
+      const nextFiles = newState.mediaList.map(m => m.file).join();
+      const changed = prevFiles !== nextFiles;
+      state = newState;
+      if (changed || !activeSlide) {
+        clearTimeout(timer);
+        currentIndex = 0;
+        showItem(0);
+      }
+    }
+
+    fetch('/api/status').then(r => r.json()).then(applyState).catch(console.error);
+
+    function connectSSE() {
+      const es = new EventSource('/api/events');
+      es.addEventListener('state', e => { try { applyState(JSON.parse(e.data)); } catch {} });
+      es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };
+    }
+    connectSSE();
+  </script>
+</body>
+</html>

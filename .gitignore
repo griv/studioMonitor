@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+*.log
+
+# Media is content, not code — large binaries (video especially) don't belong
+# in git history. Keep the directory, ignore what's in it.
+media/*
+!media/.gitkeep

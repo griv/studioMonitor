@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Studio Monitor</title>
+  <style>
+    :root {
+      --bg:        #070707;
+      --surface:   #111;
+      --surface2:  #191919;
+      --surface3:  #222;
+      --border:    rgba(255,255,255,0.07);
+      --border-hi: rgba(255,255,255,0.16);
+      --text:      #ddd;
+      --dim:       rgba(255,255,255,0.32);
+      --dimmer:    rgba(255,255,255,0.14);
+      --green:     #4ade80;
+      --radius:    10px;
+    }
+
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      min-height: 100dvh;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Layout ── */
+    .wrap { max-width: 960px; margin: 0 auto; padding: 24px 20px 80px; }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+    header h1 {
+      font-size: 16px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+    .display-link {
+      font-size: 12px;
+      color: var(--dimmer);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 20px;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .display-link:hover { border-color: var(--border-hi); color: var(--text); }
+
+    /* ── Now playing ── */
+    #now-playing {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 32px;
+      font-size: 12px;
+      color: var(--dim);
+      letter-spacing: 0.04em;
+    }
+    #np-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--dimmer);
+      flex-shrink: 0;
+      transition: background 0.4s;
+    }
+    #np-dot.active { background: var(--green); }
+
+    /* ── Section headings ── */
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .section-head h2 {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--dimmer);
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--dim);
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+      white-space: nowrap;
+    }
+    .btn:hover { border-color: var(--border-hi); color: var(--text); }
+    .btn.primary { background: #fff; color: #000; border-color: #fff; }
+    .btn.primary:hover { background: #ddd; }
+    .btn.danger { color: #f87171; border-color: rgba(248,113,113,0.3); }
+    .btn.danger:hover { background: rgba(248,113,113,0.08); }
+    .btn.small { padding: 5px 10px; font-size: 11px; }
+    .btn.icon { padding: 6px; border-radius: 8px; }
+
+    /* ── Vibes ── */
+    #vibes-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 36px;
+    }
+    .vibe-btn {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .vibe-btn:hover { border-color: var(--border-hi); }
+    .vibe-btn.active { border-color: #fff; }
+    .vibe-play {
+      padding: 9px 16px;
+      background: transparent;
+      color: var(--dim);
+      font-size: 13px;
+      cursor: pointer;
+      border: none;
+      transition: color 0.2s;
+    }
+    .vibe-btn.active .vibe-play { color: #fff; font-weight: 500; }
+    .vibe-play:hover { color: var(--text); }
+    .vibe-edit {
+      padding: 9px 11px 9px 6px;
+      background: transparent;
+      border: none;
+      color: var(--dimmer);
+      cursor: pointer;
+      font-size: 13px;
+      transition: color 0.2s;
+    }
+    .vibe-edit:hover { color: var(--dim); }
+    .new-vibe-btn { cursor: pointer; }
+
+    /* ── Bank cards ── */
+    .bank-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 12px;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .bank-card.drag-over { border-color: #fff; }
+
+    .bank-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .bank-header:hover .bank-name { color: #fff; }
+    .bank-chevron {
+      font-size: 10px;
+      color: var(--dimmer);
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    .bank-card.open .bank-chevron { transform: rotate(90deg); }
+    .bank-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      flex: 1;
+      transition: color 0.2s;
+    }
+    .bank-count {
+      font-size: 11px;
+      color: var(--dimmer);
+    }
+    .bank-play-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--dim);
+      padding: 5px 12px;
+      border-radius: 16px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+      flex-shrink: 0;
+    }
+    .bank-play-btn:hover { border-color: var(--border-hi); color: var(--text); }
+
+    .bank-body { display: none; border-top: 1px solid var(--border); }
+    .bank-card.open .bank-body { display: block; }
+
+    .bank-controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .bank-controls label {
+      font-size: 11px;
+      color: var(--dimmer);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .fit-select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .fit-select:focus { outline: none; border-color: var(--border-hi); }
+
+    /* vibe tags on bank card */
+    .bank-vibes {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .bank-vibes-label { font-size: 11px; color: var(--dimmer); }
+    .vibe-tag {
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--dim);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .vibe-tag.on { border-color: rgba(74,222,128,0.5); color: var(--green); background: rgba(74,222,128,0.08); }
+    .vibe-tag:hover { border-color: var(--border-hi); }
+
+    /* ── Thumbnail grid ── */
+    .thumb-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+      gap: 3px;
+      padding: 12px;
+    }
+    .thumb-item {
+      position: relative;
+      aspect-ratio: 1;
+      background: var(--surface2);
+      border-radius: 6px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .thumb-item img, .thumb-item canvas {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: opacity 0.2s;
+    }
+    .thumb-item.disabled img,
+    .thumb-item.disabled canvas { opacity: 0.2; }
+    .thumb-item .video-icon {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      color: rgba(255,255,255,0.6);
+      background: #111;
+    }
+    .thumb-item.disabled .video-icon { opacity: 0.2; }
+    .thumb-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0);
+      transition: background 0.15s;
+    }
+    .thumb-item:hover .thumb-overlay { background: rgba(0,0,0,0.25); }
+    .thumb-toggle {
+      position: absolute;
+      top: 6px; right: 6px;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255,255,255,0.4);
+      background: rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px;
+      color: rgba(255,255,255,0.6);
+      transition: all 0.15s;
+    }
+    .thumb-item.enabled .thumb-toggle {
+      background: var(--green);
+      border-color: var(--green);
+      color: #000;
+    }
+    .thumb-fit {
+      position: absolute;
+      bottom: 5px; left: 5px;
+      font-size: 9px;
+      letter-spacing: 0.05em;
+      color: rgba(255,255,255,0.5);
+      background: rgba(0,0,0,0.55);
+      padding: 2px 5px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+
+    /* ── Upload drop zone ── */
+    .drop-zone {
+      margin: 8px 12px 12px;
+      border: 1.5px dashed var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      text-align: center;
+      color: var(--dimmer);
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--border-hi);
+      color: var(--dim);
+      background: rgba(255,255,255,0.02);
+    }
+    .drop-zone input[type="file"] { display: none; }
+
+    /* ── New bank zone ── */
+    #new-bank-zone {
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      text-align: center;
+      color: var(--dimmer);
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+      margin-top: 20px;
+    }
+    #new-bank-zone:hover, #new-bank-zone.drag-over {
+      border-color: var(--border-hi);
+      color: var(--dim);
+      background: rgba(255,255,255,0.015);
+    }
+    #new-bank-zone .hint { font-size: 11px; color: var(--dimmer); margin-top: 4px; }
+
+    /* ── Modal ── */
+    #modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      z-index: 100;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    #modal-backdrop.open { display: flex; }
+    @media (min-width: 600px) {
+      #modal-backdrop { align-items: center; }
+    }
+    #modal {
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      border-radius: 16px 16px 0 0;
+      padding: 28px 24px 40px;
+      width: 100%;
+      max-width: 480px;
+      max-height: 85dvh;
+      overflow-y: auto;
+    }
+    @media (min-width: 600px) {
+      #modal { border-radius: 16px; }
+    }
+    #modal h3 { font-size: 16px; font-weight: 600; margin-bottom: 24px; }
+
+    .field { margin-bottom: 20px; }
+    .field label {
+      display: block;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin-bottom: 8px;
+    }
+    .field input[type="text"],
+    .field input[type="number"],
+    .field select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 14px;
+      padding: 10px 12px;
+      border-radius: 8px;
+    }
+    .field input:focus, .field select:focus { outline: none; border-color: var(--border-hi); }
+
+    .bank-checks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .bank-check-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .bank-check-label input { display: none; }
+    .bank-check-label.checked { border-color: rgba(255,255,255,0.4); color: #fff; }
+
+    .range-row { display: flex; align-items: center; gap: 10px; }
+    .range-row input[type="range"] { flex: 1; accent-color: #fff; }
+    .range-val { font-size: 12px; color: var(--dim); width: 44px; text-align: right; flex-shrink: 0; }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .toggle-switch {
+      width: 36px; height: 20px;
+      background: var(--surface3);
+      border-radius: 10px;
+      position: relative;
+      cursor: pointer;
+      transition: background 0.2s;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .toggle-switch.on { background: var(--green); border-color: var(--green); }
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      top: 2px; left: 2px;
+      width: 14px; height: 14px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle-switch.on::after { transform: translateX(16px); }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 28px;
+      flex-wrap: wrap;
+    }
+    .modal-actions .spacer { flex: 1; }
+
+    /* ── Prompt ── */
+    #prompt-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    #prompt-backdrop.open { display: flex; }
+    #prompt-box {
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      border-radius: 14px;
+      padding: 24px;
+      width: 100%;
+      max-width: 360px;
+    }
+    #prompt-box h4 { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+    #prompt-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 14px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    #prompt-input:focus { outline: none; border-color: var(--border-hi); }
+    #prompt-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      color: var(--text);
+      font-size: 12px;
+      padding: 10px 18px;
+      border-radius: 20px;
+      transition: transform 0.3s ease;
+      z-index: 300;
+      white-space: nowrap;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Studio Monitor</h1>
+    <a class="display-link" href="/" target="_blank">Display ↗</a>
+  </header>
+
+  <div id="now-playing">
+    <span id="np-dot"></span>
+    <span id="np-text">Loading…</span>
+  </div>
+
+  <!-- Vibes -->
+  <div class="section-head">
+    <h2>Vibes</h2>
+  </div>
+  <div id="vibes-row"></div>
+
+  <!-- Banks -->
+  <div class="section-head">
+    <h2>Banks</h2>
+  </div>
+  <div id="banks-list"></div>
+
+  <!-- New bank drop zone -->
+  <div id="new-bank-zone">
+    <div>Drop files here to create a new bank</div>
+    <div class="hint">or click to browse</div>
+    <input type="file" id="new-bank-input" multiple accept="image/*,video/*">
+  </div>
+
+</div>
+
+<!-- Vibe editor modal -->
+<div id="modal-backdrop">
+  <div id="modal">
+    <h3 id="modal-title">Edit Vibe</h3>
+    <div class="field">
+      <label>Name</label>
+      <input type="text" id="vibe-name-input" placeholder="e.g. late-night">
+    </div>
+    <div class="field">
+      <label>Banks</label>
+      <div id="vibe-banks-checks" class="bank-checks"></div>
+    </div>
+    <div class="field">
+      <label>Dwell time</label>
+      <div class="range-row">
+        <input type="range" id="dwell-range" min="2000" max="30000" step="500">
+        <span class="range-val" id="dwell-val">8s</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>Transition</label>
+      <div class="range-row">
+        <input type="range" id="trans-range" min="500" max="6000" step="250">
+        <span class="range-val" id="trans-val">2s</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>Default fit</label>
+      <select id="vibe-fit-select" class="fit-select" style="width:100%">
+        <option value="">— inherit global —</option>
+        <option value="blur-bg">Blurred background</option>
+        <option value="contain">Letterbox (contain)</option>
+        <option value="cover">Fill (cover)</option>
+        <option value="ken-burns">Ken Burns</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Shuffle</label>
+      <div class="toggle-row">
+        <span style="font-size:13px;color:var(--dim)">Randomise order</span>
+        <div id="shuffle-toggle" class="toggle-switch"></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn danger small" id="vibe-delete-btn">Delete</button>
+      <span class="spacer"></span>
+      <button class="btn small" id="vibe-cancel-btn">Cancel</button>
+      <button class="btn primary small" id="vibe-save-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Name prompt for new bank -->
+<div id="prompt-backdrop">
+  <div id="prompt-box">
+    <h4 id="prompt-title">Name this bank</h4>
+    <input type="text" id="prompt-input" placeholder="e.g. studio-2024">
+    <div id="prompt-actions">
+      <button class="btn small" id="prompt-cancel">Cancel</button>
+      <button class="btn primary small" id="prompt-ok">Create</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let banks = [];
+let vibesData = { vibes: [] };
+let config = { banks: {} };
+let displayState = {};
+let editingVibe = null;   // vibe object being edited (null = new)
+let pendingUploadFiles = null;
+
+const FIT_LABELS = { 'blur-bg': 'BLR', contain: 'CTN', cover: 'CVR', 'ken-burns': 'KB' };
+const FIT_OPTS = [
+  { value: '',          label: '— bank default —' },
+  { value: 'blur-bg',   label: 'Blurred bg' },
+  { value: 'contain',   label: 'Letterbox' },
+  { value: 'cover',     label: 'Fill' },
+  { value: 'ken-burns', label: 'Ken Burns' },
+];
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+const api = {
+  get: url => fetch(url).then(r => r.json()),
+  post: (url, body) => fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined }).then(r => r.json()),
+  put: (url, body) => fetch(url, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(r => r.json()),
+};
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ── Load ──────────────────────────────────────────────────────────────────────
+async function loadAll() {
+  [banks, vibesData, config, displayState] = await Promise.all([
+    api.get('/api/banks'),
+    api.get('/api/vibes'),
+    api.get('/api/config'),
+    api.get('/api/status'),
+  ]);
+  render();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render() {
+  renderNowPlaying();
+  renderVibes();
+  renderBanks();
+}
+
+function renderNowPlaying() {
+  const dot = document.getElementById('np-dot');
+  const txt = document.getElementById('np-text');
+  if (displayState.currentVibe) {
+    dot.classList.add('active');
+    txt.textContent = `Vibe: ${displayState.currentVibe}  ·  ${displayState.mediaList?.length || 0} items`;
+  } else if (displayState.currentBank) {
+    dot.classList.add('active');
+    txt.textContent = `Bank: ${displayState.currentBank}  ·  ${displayState.mediaList?.length || 0} items`;
+  } else {
+    dot.classList.remove('active');
+    txt.textContent = 'Nothing playing';
+  }
+}
+
+function renderVibes() {
+  const row = document.getElementById('vibes-row');
+  row.innerHTML = '';
+
+  vibesData.vibes.forEach(vibe => {
+    const isActive = displayState.currentVibe === vibe.name;
+    const wrap = document.createElement('div');
+    wrap.className = 'vibe-btn' + (isActive ? ' active' : '');
+
+    const playBtn = document.createElement('button');
+    playBtn.className = 'vibe-play';
+    playBtn.textContent = vibe.name;
+    playBtn.onclick = () => switchVibe(vibe.name);
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'vibe-edit';
+    editBtn.title = 'Edit';
+    editBtn.textContent = '✎';
+    editBtn.onclick = (e) => { e.stopPropagation(); openVibeModal(vibe); };
+
+    wrap.appendChild(playBtn);
+    wrap.appendChild(editBtn);
+    row.appendChild(wrap);
+  });
+
+  const newBtn = document.createElement('button');
+  newBtn.className = 'btn new-vibe-btn';
+  newBtn.textContent = '+ New vibe';
+  newBtn.onclick = () => openVibeModal(null);
+  row.appendChild(newBtn);
+}
+
+function renderBanks() {
+  const list = document.getElementById('banks-list');
+  // Preserve open state
+  const openBanks = new Set([...list.querySelectorAll('.bank-card.open')].map(c => c.dataset.bank));
+  list.innerHTML = '';
+  banks.forEach(bank => {
+    const card = buildBankCard(bank, openBanks.has(bank.name));
+    list.appendChild(card);
+  });
+}
+
+function buildBankCard(bank, startOpen) {
+  const card = document.createElement('div');
+  card.className = 'bank-card' + (startOpen ? ' open' : '');
+  card.dataset.bank = bank.name;
+
+  // ── Header
+  const header = document.createElement('div');
+  header.className = 'bank-header';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'bank-chevron';
+  chevron.textContent = '▶';
+
+  const name = document.createElement('span');
+  name.className = 'bank-name';
+  name.textContent = bank.name;
+
+  const count = document.createElement('span');
+  count.className = 'bank-count';
+  const enabledCount = bank.items.filter(i => i.enabled).length;
+  count.textContent = `${enabledCount} / ${bank.items.length}`;
+
+  const playBtn = document.createElement('button');
+  playBtn.className = 'bank-play-btn';
+  const isActive = displayState.currentBank === bank.name && !displayState.currentVibe;
+  playBtn.textContent = isActive ? '● Playing' : '▶ Play';
+  playBtn.style.color = isActive ? 'var(--green)' : '';
+  playBtn.onclick = e => { e.stopPropagation(); switchBank(bank.name); };
+
+  header.appendChild(chevron);
+  header.appendChild(name);
+  header.appendChild(count);
+  header.appendChild(playBtn);
+  header.onclick = () => card.classList.toggle('open');
+  card.appendChild(header);
+
+  // ── Body
+  const body = document.createElement('div');
+  body.className = 'bank-body';
+
+  // Controls row
+  const controls = document.createElement('div');
+  controls.className = 'bank-controls';
+
+  // Default fit
+  const fitLabel = document.createElement('label');
+  fitLabel.textContent = 'Default fit';
+  const fitSel = document.createElement('select');
+  fitSel.className = 'fit-select';
+  [{ value: '', label: '— global —' }, { value: 'blur-bg', label: 'Blurred bg' }, { value: 'contain', label: 'Letterbox' }, { value: 'cover', label: 'Fill' }, { value: 'ken-burns', label: 'Ken Burns' }]
+    .forEach(o => { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; fitSel.appendChild(opt); });
+  fitSel.value = bank.defaultFit || '';
+  fitSel.onchange = () => setBankDefaultFit(bank.name, fitSel.value || null);
+  fitLabel.appendChild(fitSel);
+  controls.appendChild(fitLabel);
+
+  // Vibe membership tags
+  const vibesWrap = document.createElement('div');
+  vibesWrap.className = 'bank-vibes';
+  const vibesLbl = document.createElement('span');
+  vibesLbl.className = 'bank-vibes-label';
+  vibesLbl.textContent = 'Vibes:';
+  vibesWrap.appendChild(vibesLbl);
+
+  vibesData.vibes.forEach(vibe => {
+    const inVibe = vibe.banks.includes(bank.name);
+    const tag = document.createElement('button');
+    tag.className = 'vibe-tag' + (inVibe ? ' on' : '');
+    tag.textContent = vibe.name;
+    tag.onclick = () => toggleBankInVibe(bank.name, vibe.name, tag);
+    vibesWrap.appendChild(tag);
+  });
+  controls.appendChild(vibesWrap);
+  body.appendChild(controls);
+
+  // Thumbnail grid
+  const grid = document.createElement('div');
+  grid.className = 'thumb-grid';
+  bank.items.forEach(item => grid.appendChild(buildThumb(bank.name, item)));
+  body.appendChild(grid);
+
+  // Upload drop zone
+  const dz = document.createElement('div');
+  dz.className = 'drop-zone';
+  dz.innerHTML = '<span>Drop files to add · or click to browse</span><input type="file" multiple accept="image/*,video/*">';
+  const dzInput = dz.querySelector('input');
+  dz.onclick = e => { if (e.target !== dzInput) dzInput.click(); };
+  dzInput.onchange = () => uploadToBank(bank.name, dzInput.files);
+  setupDropZone(dz, files => uploadToBank(bank.name, files));
+  body.appendChild(dz);
+
+  card.appendChild(body);
+
+  // Card-level drag-over for uploads
+  setupDropZone(card, files => uploadToBank(bank.name, files), true);
+
+  return card;
+}
+
+function buildThumb(bankName, item) {
+  const wrap = document.createElement('div');
+  wrap.className = 'thumb-item ' + (item.enabled ? 'enabled' : 'disabled');
+  wrap.title = item.name;
+
+  if (item.type === 'image') {
+    const img = document.createElement('img');
+    img.src = item.file;
+    img.alt = '';
+    img.loading = 'lazy';
+    wrap.appendChild(img);
+  } else {
+    // Video: try to grab first frame via canvas, fallback to icon
+    const placeholder = document.createElement('div');
+    placeholder.className = 'video-icon';
+    placeholder.textContent = '▶';
+    wrap.appendChild(placeholder);
+    captureVideoFrame(item.file).then(dataUrl => {
+      if (dataUrl) {
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.alt = '';
+        placeholder.replaceWith(img);
+      }
+    });
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'thumb-overlay';
+
+  const toggle = document.createElement('div');
+  toggle.className = 'thumb-toggle';
+  toggle.textContent = item.enabled ? '✓' : '';
+
+  const fitBadge = document.createElement('div');
+  fitBadge.className = 'thumb-fit';
+  fitBadge.textContent = item.fit ? FIT_LABELS[item.fit] : '·';
+
+  wrap.appendChild(overlay);
+  wrap.appendChild(toggle);
+  wrap.appendChild(fitBadge);
+
+  // Click → cycle fit on right-click, toggle enabled on left-click
+  wrap.onclick = e => {
+    if (e.shiftKey) {
+      cycleFit(bankName, item, wrap, fitBadge);
+    } else {
+      toggleItem(bankName, item, wrap, toggle);
+    }
+  };
+  wrap.oncontextmenu = e => { e.preventDefault(); cycleFit(bankName, item, wrap, fitBadge); };
+
+  return wrap;
+}
+
+// ── Video frame capture ───────────────────────────────────────────────────────
+function captureVideoFrame(src) {
+  return new Promise(resolve => {
+    const video = document.createElement('video');
+    video.src = src;
+    video.muted = true;
+    video.preload = 'metadata';
+    let done = false;
+    const finish = val => { if (!done) { done = true; resolve(val); video.src = ''; } };
+
+    video.addEventListener('loadeddata', () => { video.currentTime = 0.5; }, { once: true });
+    video.addEventListener('seeked', () => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = 110; c.height = 110;
+        const ctx = c.getContext('2d');
+        const vr = video.videoWidth / video.videoHeight;
+        let sx, sy, sw, sh;
+        if (vr > 1) { sh = video.videoHeight; sw = sh; sx = (video.videoWidth - sw) / 2; sy = 0; }
+        else { sw = video.videoWidth; sh = sw; sx = 0; sy = (video.videoHeight - sh) / 2; }
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, 110, 110);
+        finish(c.toDataURL());
+      } catch { finish(null); }
+    }, { once: true });
+
+    video.addEventListener('error', () => finish(null), { once: true });
+    setTimeout(() => finish(null), 6000);
+  });
+}
+
+// ── Item actions ──────────────────────────────────────────────────────────────
+function ensureBankConfig(bankName) {
+  if (!config.banks) config.banks = {};
+  if (!config.banks[bankName]) config.banks[bankName] = {};
+  if (!config.banks[bankName].items) config.banks[bankName].items = {};
+}
+
+function ensureItemConfig(bankName, itemName) {
+  ensureBankConfig(bankName);
+  if (!config.banks[bankName].items[itemName]) config.banks[bankName].items[itemName] = {};
+}
+
+async function saveConfig() {
+  await api.put('/api/config', config);
+}
+
+function toggleItem(bankName, item, wrap, toggleEl) {
+  ensureItemConfig(bankName, item.name);
+  item.enabled = !item.enabled;
+  config.banks[bankName].items[item.name].enabled = item.enabled;
+  wrap.classList.toggle('enabled', item.enabled);
+  wrap.classList.toggle('disabled', !item.enabled);
+  toggleEl.textContent = item.enabled ? '✓' : '';
+  saveConfig();
+  refreshCountLabel(bankName);
+}
+
+const FIT_CYCLE = ['', 'blur-bg', 'contain', 'cover', 'ken-burns'];
+function cycleFit(bankName, item, wrap, fitBadge) {
+  ensureItemConfig(bankName, item.name);
+  const cur = item.fit || '';
+  const idx = FIT_CYCLE.indexOf(cur);
+  const next = FIT_CYCLE[(idx + 1) % FIT_CYCLE.length];
+  item.fit = next || null;
+  config.banks[bankName].items[item.name].fit = next || null;
+  fitBadge.textContent = next ? FIT_LABELS[next] : '·';
+  saveConfig();
+  toast(next ? `Fit: ${next}` : 'Fit: bank default');
+}
+
+function setBankDefaultFit(bankName, fit) {
+  ensureBankConfig(bankName);
+  config.banks[bankName].defaultFit = fit || null;
+  saveConfig();
+  // Update local bank object too
+  const b = banks.find(b => b.name === bankName);
+  if (b) b.defaultFit = fit;
+}
+
+function refreshCountLabel(bankName) {
+  const card = document.querySelector(`.bank-card[data-bank="${bankName}"]`);
+  if (!card) return;
+  const b = banks.find(b => b.name === bankName);
+  if (!b) return;
+  const enabled = b.items.filter(i => i.enabled).length;
+  const countEl = card.querySelector('.bank-count');
+  if (countEl) countEl.textContent = `${enabled} / ${b.items.length}`;
+}
+
+// ── Vibe membership ───────────────────────────────────────────────────────────
+async function toggleBankInVibe(bankName, vibeName, tagEl) {
+  const vibe = vibesData.vibes.find(v => v.name === vibeName);
+  if (!vibe) return;
+  const inVibe = vibe.banks.includes(bankName);
+  if (inVibe) vibe.banks = vibe.banks.filter(b => b !== bankName);
+  else vibe.banks.push(bankName);
+  tagEl.classList.toggle('on', !inVibe);
+  await api.put('/api/vibes', vibesData);
+  toast(inVibe ? `Removed from ${vibeName}` : `Added to ${vibeName}`);
+}
+
+// ── Switch display ────────────────────────────────────────────────────────────
+async function switchBank(name) {
+  await api.post(`/api/bank/${name}`);
+  displayState = await api.get('/api/status');
+  renderNowPlaying();
+  renderVibes();
+  // Refresh play buttons
+  document.querySelectorAll('.bank-play-btn').forEach(btn => {
+    const card = btn.closest('.bank-card');
+    const isNow = card?.dataset.bank === name;
+    btn.textContent = isNow ? '● Playing' : '▶ Play';
+    btn.style.color = isNow ? 'var(--green)' : '';
+  });
+  toast(`Playing: ${name}`);
+}
+
+async function switchVibe(name) {
+  await api.post(`/api/vibe/${name}`);
+  displayState = await api.get('/api/status');
+  renderNowPlaying();
+  renderVibes();
+  toast(`Vibe: ${name}`);
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+async function uploadToBank(bankName, files) {
+  if (!files?.length) return;
+  const fd = new FormData();
+  [...files].forEach(f => fd.append('files', f));
+  toast(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}…`);
+  const res = await fetch(`/api/upload/${encodeURIComponent(bankName)}`, { method: 'POST', body: fd });
+  const data = await res.json();
+  if (data.ok) {
+    toast(`Added ${data.uploaded.length} file${data.uploaded.length > 1 ? 's' : ''}`);
+    banks = await api.get('/api/banks');
+    renderBanks();
+    // Re-open the card
+    const card = document.querySelector(`.bank-card[data-bank="${bankName}"]`);
+    if (card) card.classList.add('open');
+  }
+}
+
+// ── Drop zone helper ──────────────────────────────────────────────────────────
+function setupDropZone(el, onDrop, cardMode = false) {
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
+  el.addEventListener('dragleave', e => {
+    if (!el.contains(e.relatedTarget)) el.classList.remove('drag-over');
+  });
+  el.addEventListener('drop', e => {
+    e.preventDefault();
+    el.classList.remove('drag-over');
+    const files = e.dataTransfer.files;
+    if (files.length) onDrop(files);
+  });
+}
+
+// ── New bank drop zone ────────────────────────────────────────────────────────
+const newBankZone = document.getElementById('new-bank-zone');
+const newBankInput = document.getElementById('new-bank-input');
+newBankZone.onclick = e => { if (e.target !== newBankInput) newBankInput.click(); };
+newBankInput.onchange = () => promptNewBank(newBankInput.files);
+setupDropZone(newBankZone, files => promptNewBank(files));
+
+function promptNewBank(files) {
+  pendingUploadFiles = files;
+  const suggestion = files[0]?.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_\- ]/g, '') || '';
+  openPrompt('Name this bank', suggestion, async name => {
+    if (!name.trim()) return;
+    await uploadToBank(name.trim(), pendingUploadFiles);
+    pendingUploadFiles = null;
+    newBankInput.value = '';
+  });
+}
+
+// ── Prompt dialog ─────────────────────────────────────────────────────────────
+let promptCallback = null;
+function openPrompt(title, defaultVal, cb) {
+  promptCallback = cb;
+  document.getElementById('prompt-title').textContent = title;
+  document.getElementById('prompt-input').value = defaultVal;
+  document.getElementById('prompt-backdrop').classList.add('open');
+  setTimeout(() => document.getElementById('prompt-input').select(), 50);
+}
+document.getElementById('prompt-ok').onclick = () => {
+  const val = document.getElementById('prompt-input').value;
+  document.getElementById('prompt-backdrop').classList.remove('open');
+  if (promptCallback) promptCallback(val);
+};
+document.getElementById('prompt-cancel').onclick = () => {
+  document.getElementById('prompt-backdrop').classList.remove('open');
+  promptCallback = null;
+};
+document.getElementById('prompt-input').onkeydown = e => {
+  if (e.key === 'Enter') document.getElementById('prompt-ok').click();
+  if (e.key === 'Escape') document.getElementById('prompt-cancel').click();
+};
+
+// ── Vibe modal ────────────────────────────────────────────────────────────────
+function openVibeModal(vibe) {
+  editingVibe = vibe;
+  document.getElementById('modal-title').textContent = vibe ? `Edit — ${vibe.name}` : 'New vibe';
+  document.getElementById('vibe-name-input').value = vibe?.name || '';
+  document.getElementById('vibe-delete-btn').style.display = vibe ? '' : 'none';
+
+  // Banks checkboxes
+  const checksWrap = document.getElementById('vibe-banks-checks');
+  checksWrap.innerHTML = '';
+  banks.forEach(b => {
+    const checked = vibe?.banks.includes(b.name) ?? false;
+    const lbl = document.createElement('label');
+    lbl.className = 'bank-check-label' + (checked ? ' checked' : '');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = b.name;
+    cb.checked = checked;
+    cb.onchange = () => lbl.classList.toggle('checked', cb.checked);
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(b.name));
+    checksWrap.appendChild(lbl);
+  });
+
+  const dwell = vibe?.dwellTime ?? 8000;
+  const trans = vibe?.transitionDuration ?? 2000;
+  document.getElementById('dwell-range').value = dwell;
+  document.getElementById('dwell-val').textContent = (dwell / 1000).toFixed(1) + 's';
+  document.getElementById('trans-range').value = trans;
+  document.getElementById('trans-val').textContent = (trans / 1000).toFixed(1) + 's';
+  document.getElementById('vibe-fit-select').value = vibe?.defaultFit || '';
+  const shuffleEl = document.getElementById('shuffle-toggle');
+  shuffleEl.classList.toggle('on', vibe?.shuffle ?? false);
+
+  document.getElementById('modal-backdrop').classList.add('open');
+}
+
+document.getElementById('dwell-range').oninput = e => {
+  document.getElementById('dwell-val').textContent = (e.target.value / 1000).toFixed(1) + 's';
+};
+document.getElementById('trans-range').oninput = e => {
+  document.getElementById('trans-val').textContent = (e.target.value / 1000).toFixed(1) + 's';
+};
+document.getElementById('shuffle-toggle').onclick = function() { this.classList.toggle('on'); };
+
+document.getElementById('vibe-cancel-btn').onclick = () => {
+  document.getElementById('modal-backdrop').classList.remove('open');
+};
+
+document.getElementById('vibe-save-btn').onclick = async () => {
+  const name = document.getElementById('vibe-name-input').value.trim();
+  if (!name) return;
+  const selectedBanks = [...document.querySelectorAll('#vibe-banks-checks input:checked')].map(c => c.value);
+  const saved = {
+    name,
+    banks: selectedBanks,
+    dwellTime: +document.getElementById('dwell-range').value,
+    transitionDuration: +document.getElementById('trans-range').value,
+    defaultFit: document.getElementById('vibe-fit-select').value || null,
+    shuffle: document.getElementById('shuffle-toggle').classList.contains('on'),
+  };
+
+  if (editingVibe) {
+    const idx = vibesData.vibes.findIndex(v => v.name === editingVibe.name);
+    if (idx >= 0) vibesData.vibes[idx] = saved;
+  } else {
+    vibesData.vibes.push(saved);
+  }
+
+  await api.put('/api/vibes', vibesData);
+  document.getElementById('modal-backdrop').classList.remove('open');
+  renderVibes();
+  renderBanks();
+  toast(`Saved: ${name}`);
+};
+
+document.getElementById('vibe-delete-btn').onclick = async () => {
+  if (!editingVibe) return;
+  vibesData.vibes = vibesData.vibes.filter(v => v.name !== editingVibe.name);
+  await api.put('/api/vibes', vibesData);
+  document.getElementById('modal-backdrop').classList.remove('open');
+  renderVibes();
+  renderBanks();
+  toast(`Deleted: ${editingVibe.name}`);
+};
+
+document.getElementById('modal-backdrop').onclick = e => {
+  if (e.target === document.getElementById('modal-backdrop'))
+    document.getElementById('modal-backdrop').classList.remove('open');
+};
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
+function connectSSE() {
+  const es = new EventSource('/api/events');
+  es.addEventListener('state', e => {
+    try {
+      displayState = JSON.parse(e.data);
+      renderNowPlaying();
+      renderVibes();
+    } catch {}
+  });
+  es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+loadAll();
+connectSSE();
+</script>
+</body>
+</html>
