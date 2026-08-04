@@ -46,6 +46,20 @@ Then, from your phone on the same network: `http://<gr6-ip>:3000/admin`.
 
 `install.sh` is idempotent — safe to re-run after a config change.
 
+### `file:/cdrom ... no longer has a Release file`
+
+The installer's CD-ROM entry, left in apt's sources after a desktop install. It has
+nothing to do with this project, but it makes `apt-get update` exit non-zero. Find
+and disable it:
+
+```sh
+grep -rn cdrom /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null
+```
+
+If it's a `deb cdrom:` line in `sources.list`, comment it out. If it's a `.sources`
+file in `sources.list.d/`, add `Enabled: no` to the stanza or delete the file. Then
+`sudo apt update` should come back clean.
+
 ### If the install fails
 
 Almost always Node. `install.sh` pulls Node 24 from NodeSource, which needs a

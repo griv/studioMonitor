@@ -24,7 +24,11 @@ step() { echo; echo "==> $*"; }
 
 # ── Packages ────────────────────────────────────────────────────────────────
 step "Base packages"
-sudo apt-get update -qq
+# A stale entry — the installer's cdrom source is the usual one — makes apt-get
+# update exit non-zero even when every repo we actually need is fine. Don't let
+# that abort the install; the install step below fails loudly if a package really
+# can't be fetched.
+sudo apt-get update -qq || echo "    (apt update reported errors — continuing)"
 sudo apt-get install -y curl git ca-certificates unclutter x11-xserver-utils
 
 step "Node.js"
