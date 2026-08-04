@@ -32,12 +32,39 @@ sudo apt-get update -qq || echo "    (apt update reported errors — continuing)
 sudo apt-get install -y curl git ca-certificates unclutter x11-xserver-utils
 
 step "Node.js"
-if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt "$NODE_MAJOR" ]; then
-  # Ubuntu's packaged node is usually too old; NodeSource tracks current LTS.
+node_ok() {
+  command -v node >/dev/null \
+    && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge "$NODE_MAJOR" ]
+}
+
+if ! node_ok; then
+  # Ubuntu's packaged node is too old and, unlike NodeSource's, doesn't bundle npm.
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | sudo -E bash -
   sudo apt-get install -y nodejs
 fi
-echo "    $(node --version) at $(command -v node)"
+
+# Verify rather than assume. If apt couldn't read the NodeSource repository it
+# silently installs Ubuntu's nodejs instead, and the first symptom is
+# "npm: command not found" several steps later, which points nowhere useful.
+if ! node_ok; then
+  cat <<EOF
+
+Node ${NODE_MAJOR}+ is required, but $(node --version 2>/dev/null || echo "nothing") is installed.
+
+apt almost certainly could not read the NodeSource repository, and fell back to
+Ubuntu's own nodejs package — which is too old and ships without npm.
+
+That usually means 'apt-get update' is failing on an unrelated stale source. The
+Ubuntu installer's CD-ROM entry is the common culprit. Find it with:
+
+  grep -rn cdrom /etc/apt/sources.list /etc/apt/sources.list.d/
+
+Comment out or delete the offending entry, confirm 'sudo apt update' comes back
+clean, then re-run this script.
+EOF
+  exit 1
+fi
+echo "    $(node --version), npm $(npm --version) at $(command -v node)"
 
 step "Browser"
 if ! command -v chromium-browser >/dev/null && ! command -v chromium >/dev/null; then
