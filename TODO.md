@@ -75,12 +75,17 @@ It's a device on a wall, not a page I'm babysitting. Failures need to be self-he
 
 ## 5. Kiosk / deployment
 
-- [ ] Fill in the [studio-monitor.service](studio-monitor.service) placeholders
-      (`YOUR_USER`, `/path/to/studioMonitor`) and install it.
+Target box: ASUS GR6 mini PC, Xubuntu. See [deploy/README.md](deploy/README.md).
+
+- [x] systemd unit with real values, rendered by `deploy/install.sh`.
+- [x] Kiosk autostart: portrait rotation, blanking disabled, browser relaunched if it
+      dies, LightDM auto-login so a power cut doesn't strand the wall on a login prompt.
+- [x] `deploy/update.sh` for `git pull` + restart over SSH.
+- [ ] **Reboot test.** Everything above is untested on the actual hardware — pull the
+      power and confirm it comes back to the slideshow unattended.
 - [ ] Fill in `UBUNTU_IP` in [home-assistant.yaml](home-assistant.yaml).
-- [ ] Display-side kiosk setup, all of which needs to survive a power cut:
-      browser in kiosk mode pointed at `/`, autostart on boot, screen blanking and
-      screensaver disabled, HDMI output rotated to portrait.
+- [ ] Check GPU acceleration on the GR6 (`chrome://gpu`). A full-screen 28px blur at
+      1080×1920 on decade-old hardware is fine on the GPU and painful on llvmpipe.
 - [ ] **Scheduled on/off** via Home Assistant — dark overnight. Saves the panel and stops
       the studio glowing at 3am.
 - [ ] **Burn-in mitigation.** A static image on a panel for hours is the risk case. Cap the
@@ -113,7 +118,34 @@ It's a device on a wall, not a page I'm babysitting. Failures need to be self-he
       and right now there's no way to answer it.
 - [ ] Per-item dwell override, so a dense piece can hold longer than a simple one.
 
-## 8. Housekeeping
+## 8. Data store
+
+Two flat JSON files, each rewritten whole on every change. That's fine for what they hold
+today and wrong for where sections 2 and 7 are going.
+
+- [ ] **Atomic writes — do this regardless of anything else below.** `saveJSON`
+      ([server.js:29](server.js#L29)) is a bare `writeFileSync`. A power cut mid-write
+      truncates the file, and `loadJSON` ([server.js:24](server.js#L24)) catches the parse
+      error and silently returns `{banks:{}}` — so a bad moment at the wall socket wipes
+      every fit and enable setting with no error anywhere. Write to a temp file and
+      `rename()` over the target.
+- [ ] **Stop replacing whole documents.** `PUT /api/config`
+      ([server.js:180](server.js#L180)) writes the request body verbatim, unvalidated, so
+      two admin tabs silently clobber each other and a malformed body corrupts the file.
+      Per-item `PATCH` endpoints instead.
+- [ ] **Move to SQLite** once items grow metadata and history.
+      `node:sqlite` is built into current Node — no dependency, no native build on the
+      GR6. Wins where JSON can't follow: append-only play history (needed for
+      no-repeat shuffle and the recently-shown list), scheduled vibes, and querying
+      attribution.
+- [ ] **Key on content, not filename.** Both stores key per-item config by filename, so
+      renaming a file silently orphans its fit, focal point and attribution.
+- [ ] **Back up the attribution.** Once artist/source data is hand-typed it's the most
+      expensive thing in the system and the only part that can't be regenerated — and it
+      currently lives only on a gitignored file on a decade-old disk. Export to JSON on a
+      timer and commit it, or push it somewhere off-box.
+
+## 9. Housekeeping
 
 - [x] **README** — what it is, how to run it, how banks and vibes relate.
 - [ ] **Validate `:name` on bank/vibe routes.** `SAFE_NAME` guards uploads

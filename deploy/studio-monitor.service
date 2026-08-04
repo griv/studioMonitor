@@ -1,0 +1,23 @@
+[Unit]
+Description=Studio Monitor
+Documentation=https://github.com/griv/studioMonitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=/usr/bin/node server.js
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Restart=always
+RestartSec=5
+
+# The server writes vibes.json, media-config.json and uploads into media/,
+# so it runs as the desktop user who owns the checkout.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

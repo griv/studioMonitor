@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Studio Monitor Kiosk
+Comment=Portrait kiosk browser for the studio wall
+Exec=__DIR__/deploy/kiosk.sh
+Icon=video-display
+Terminal=false
+X-GNOME-Autostart-enabled=true
+StartupNotify=false

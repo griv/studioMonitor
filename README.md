@@ -151,17 +151,20 @@ State lives in memory only — a restart falls back to the first bank alphabetic
 
 ## Deployment
 
-[`studio-monitor.service`](studio-monitor.service) is a systemd unit for the host box.
-Fill in `User` and `WorkingDirectory` first:
+The wall runs on an ASUS GR6 mini PC under Xubuntu. Clone, install, reboot:
 
 ```sh
-sudo cp studio-monitor.service /etc/systemd/system/
-sudo systemctl enable --now studio-monitor
+git clone https://github.com/griv/studioMonitor.git
+cd studioMonitor
+./deploy/install.sh    # as your normal user, not with sudo
+sudo reboot
 ```
 
-On the display machine, point a browser at `/` in kiosk mode with the output rotated to
-portrait, and make sure screen blanking and the screensaver are off. All of it needs to
-come back by itself after a power cut.
+That installs Node, the systemd service, the portrait kiosk autostart and LightDM
+auto-login — so the box goes from power-on to slideshow with nothing attached. Updates
+afterwards are `./deploy/update.sh` over SSH.
+
+Full setup, rotation, driver caveats and troubleshooting: **[deploy/README.md](deploy/README.md)**.
 
 [`home-assistant.yaml`](home-assistant.yaml) has copy-paste `rest_command`, `input_select`
 and automation snippets that turn bank and vibe switching into dropdowns on a dashboard.
@@ -174,8 +177,12 @@ Set `UBUNTU_IP` to the server's address.
 | [`server.js`](server.js) | Express server, SSE broadcast, file watcher, upload handling |
 | [`public/index.html`](public/index.html) | The display — slide building, transitions, Ken Burns |
 | [`public/admin.html`](public/admin.html) | Admin UI |
-| [`vibes.json`](vibes.json) | Vibe definitions (hand- or UI-edited) |
-| [`media-config.json`](media-config.json) | Per-item enable/fit state (UI-written) |
+| [`deploy/`](deploy/) | systemd unit, kiosk script, install and update scripts |
+| `vibes.json` | Vibe definitions — device state, gitignored, seeded from `vibes.example.json` |
+| `media-config.json` | Per-item enable/fit state — same, from `media-config.example.json` |
 | [`media/`](media/) | Banks — gitignored |
+
+`vibes.json` and `media-config.json` are rewritten by the admin UI, so they're kept out of
+git; otherwise every `git pull` on the display machine collides with them.
 
 Planned work and known rough edges: [TODO.md](TODO.md).

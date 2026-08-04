@@ -6,3 +6,8 @@ node_modules/
 # in git history. Keep the directory, ignore what's in it.
 media/*
 !media/.gitkeep
+
+# Runtime state, rewritten by the admin UI. Tracking these guarantees a
+# `git pull` conflict on the display machine. Seeded from the .example files.
+vibes.json
+media-config.json
