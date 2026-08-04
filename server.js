@@ -1,3 +1,14 @@
+// The library lives in SQLite via node:sqlite, which is only available unflagged
+// from Node 24. Fail here with something readable rather than deep in a require
+// on a wall-mounted box whose only output is journalctl.
+try {
+  require('node:sqlite');
+} catch {
+  console.error(`Studio Monitor needs Node 24 or newer — running ${process.version}.`);
+  console.error('On the display machine: re-run ./deploy/install.sh. Locally: nvm use.');
+  process.exit(1);
+}
+
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -235,8 +246,15 @@ app.post('/api/upload/:bank', upload.array('files'), (req, res) => {
 
 // ── File watcher ──────────────────────────────────────────────────────────────
 
+// chokidar fires once per file, so a 12-file upload would otherwise mean 12
+// rescans and 12 full-state broadcasts — and the broadcast carries the whole
+// mediaList. Coalesce on a trailing edge.
+let watchTimer = null;
 chokidar.watch(MEDIA_DIR, { ignoreInitial: true, ignorePermissionErrors: true })
-  .on('all', () => refreshMediaList());
+  .on('all', () => {
+    clearTimeout(watchTimer);
+    watchTimer = setTimeout(refreshMediaList, 500);
+  });
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 

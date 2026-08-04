@@ -17,7 +17,11 @@ through Home Assistant.
 
 ## Running it
 
+Needs **Node 24 or newer** — the library is stored in SQLite via `node:sqlite`, which is
+only available unflagged from 24. There's an `.nvmrc`, so `nvm use` picks it up.
+
 ```sh
+nvm use
 npm install
 npm start
 ```

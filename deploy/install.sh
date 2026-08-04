@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USER_NAME="$(id -un)"
-NODE_MAJOR=22
+NODE_MAJOR=24   # node:sqlite is only unflagged from 24
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "Run this as your normal user, not with sudo." >&2
