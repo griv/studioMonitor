@@ -6,19 +6,71 @@ monitor. Xubuntu gives us X11 + LightDM + XFCE, which is the easy path here —
 
 ## First install
 
+### 1. Give the box read access to the repo
+
+The repo is private, so HTTPS cloning would prompt for credentials the box hasn't
+got. A read-only **deploy key** is the right shape for a device: scoped to this one
+repo, revocable from GitHub without touching your account.
+
+On the GR6:
+
 ```sh
-git clone https://github.com/griv/studioMonitor.git
-cd studioMonitor
+sudo apt update && sudo apt install -y git
+ssh-keygen -t ed25519 -C "gr6-studio-monitor" -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub
+```
+
+Paste that key into **GitHub → the repo → Settings → Deploy keys → Add deploy key**.
+Leave "Allow write access" unchecked — the wall only ever pulls.
+
+### 2. Clone and install
+
+```sh
+git clone git@github.com:griv/studioMonitor.git ~/studioMonitor
+cd ~/studioMonitor
 ./deploy/install.sh          # as your normal user, NOT with sudo
+```
+
+### 3. Get the media across
+
+`media/` is gitignored, so the clone arrives empty. Bulk-copy it once from the Mac:
+
+```sh
+rsync -av --progress ~/Projects/studioMonitor/media/ steve@<gr6-ip>:~/studioMonitor/media/
+```
+
+The watcher picks the files up within a second and the scan indexes them — no
+restart needed. After this, adding work is drag-and-drop in the admin page.
+
+The database is not copied. It's device state, and it rebuilds itself from whatever
+is on disk; only hand-typed attribution is worth carrying over, via `/api/export`.
+
+### 4. Reboot — that's the actual test
+
+```sh
 sudo reboot
 ```
 
-After the reboot the box should go: power on → auto-login → XFCE session →
-portrait rotation → kiosk browser on the slideshow, with no keyboard touched.
-The reboot is the actual test; everything before it only proves the pieces
-install.
+The box should go: power on → auto-login → XFCE session → portrait rotation →
+kiosk browser on the slideshow, with no keyboard touched. Everything before the
+reboot only proves the pieces install.
+
+Then, from your phone on the same network: `http://<gr6-ip>:3000/admin`.
 
 `install.sh` is idempotent — safe to re-run after a config change.
+
+### If step 2 fails
+
+Almost always Node. `install.sh` pulls Node 24 from NodeSource, which needs a
+release NodeSource still builds for. Check what you're on:
+
+```sh
+lsb_release -a && node --version
+```
+
+22.04 and 24.04 are fine. On something older, upgrade the OS rather than pinning
+an older Node — the library needs `node:sqlite`, which doesn't exist before 22
+and isn't unflagged before 24.
 
 ## What it sets up
 
