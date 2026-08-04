@@ -64,13 +64,16 @@ It's a device on a wall, not a page I'm babysitting. Failures need to be self-he
 - [ ] **SSE heartbeat.** No keepalive is sent, so an idle connection can be dropped silently
       without firing `onerror` — the display then sits on stale state forever. Send a
       `:ping` comment every ~20 s, and have the client reload if it hears nothing for ~60 s.
-- [ ] **Debounce the file watcher.** chokidar fires per-file
-      ([server.js:238](server.js#L238)), so a 12-file upload triggers 12 refreshes and 12
-      broadcasts. Coalesce on a ~500 ms trailing edge.
-- [ ] **Stop restarting the slideshow on every change.** `applyState`
+- [x] **Debounce the file watcher** — 500 ms trailing edge. Verified: 5 simultaneous files
+      now produce one broadcast, not five.
+- [x] **Stop reshuffling on every file event.** `refreshMediaList` reshuffled the whole list
+      on every chokidar event, so each file touch — and attribution editing is write-heavy —
+      jumped the wall back to the start in a new random order. Surviving items now keep
+      their position and new ones are appended.
+- [ ] **Stop restarting the slideshow on every change** (client half). `applyState`
       ([index.html:260](public/index.html#L260)) resets to index 0 whenever the media list
-      differs — so toggling one item in admin jumps the wall back to the first image.
-      Preserve position where the current item still exists.
+      differs. Metadata-only edits no longer change it, but an upload still restarts the
+      show. Preserve position where the current item still exists.
 - [ ] Client-side watchdog: if no slide has advanced in ~5 min, reload the page.
 
 ## 5. Kiosk / deployment
@@ -120,38 +123,33 @@ Target box: ASUS GR6 mini PC, Xubuntu. See [deploy/README.md](deploy/README.md).
 
 ## 8. Data store
 
-Two flat JSON files, each rewritten whole on every change. That's fine for what they hold
-today and wrong for where sections 2 and 7 are going.
+Now `data/studio.db` (SQLite, WAL) via `node:sqlite` — no dependency, no native build on
+the GR6. See [lib/](lib/).
 
-- [ ] **Atomic writes — do this regardless of anything else below.** `saveJSON`
-      ([server.js:29](server.js#L29)) is a bare `writeFileSync`. A power cut mid-write
-      truncates the file, and `loadJSON` ([server.js:24](server.js#L24)) catches the parse
-      error and silently returns `{banks:{}}` — so a bad moment at the wall socket wipes
-      every fit and enable setting with no error anywhere. Write to a temp file and
-      `rename()` over the target.
-- [ ] **Stop replacing whole documents.** `PUT /api/config`
-      ([server.js:180](server.js#L180)) writes the request body verbatim, unvalidated, so
-      two admin tabs silently clobber each other and a malformed body corrupts the file.
-      Per-item `PATCH` endpoints instead.
-- [ ] **Move to SQLite** once items grow metadata and history.
-      `node:sqlite` is built into current Node — no dependency, no native build on the
-      GR6. Wins where JSON can't follow: append-only play history (needed for
-      no-repeat shuffle and the recently-shown list), scheduled vibes, and querying
-      attribution.
-- [ ] **Key on content, not filename.** Both stores key per-item config by filename, so
-      renaming a file silently orphans its fit, focal point and attribution.
-- [ ] **Back up the attribution.** Once artist/source data is hand-typed it's the most
-      expensive thing in the system and the only part that can't be regenerated — and it
-      currently lives only on a gitignored file on a decade-old disk. Export to JSON on a
-      timer and commit it, or push it somewhere off-box.
+- [x] **Durability.** Superseded rather than patched: `saveJSON` was a bare `writeFileSync`
+      and `loadJSON` silently swallowed parse errors, so a power cut mid-write wiped every
+      setting with no error anywhere. WAL handles this properly; the atomic-write fix was
+      no longer needed.
+- [x] **Stop replacing whole documents.** Per-field `PATCH` with validation. Verified two
+      concurrent clients editing different items both survive.
+- [x] **Move to SQLite** — done early, precisely because there was nothing to migrate.
+- [x] **Survive a rename.** Surrogate item id plus a head+tail fingerprint used only to
+      match a vanished path to an appeared one, so attribution follows a file across
+      renames and across banks. The scanner never deletes — a vanished file gets
+      `missing_since` — and refuses to flag anything when over half a bank disappears at
+      once, which means an unmounted volume rather than a deletion.
+- [ ] **Back up the attribution.** `GET /api/export` dumps the library as JSON; still needs
+      a timer writing `data/attribution-backup.json` and something pushing it off-box. Once
+      artist data is hand-typed it's the only part of the system that can't be regenerated.
+- [ ] **Play history table** for no-repeat shuffle and the recently-shown list (§7).
+- [ ] **Persist last played** in `kv` and restore on boot (§4).
 
 ## 9. Housekeeping
 
 - [x] **README** — what it is, how to run it, how banks and vibes relate.
-- [ ] **Validate `:name` on bank/vibe routes.** `SAFE_NAME` guards uploads
-      ([server.js:115](server.js#L115)) but not
-      [`/api/bank/:name`](server.js#L186) — it only ever reaches `readdirSync`, so the
-      exposure is directory listing rather than file read, but it should be checked anyway.
+- [x] **Validate `:name` on bank/vibe routes**, plus every request body. Unknown keys are
+      dropped so a stale client doesn't break; bad values for known keys are rejected with
+      a reason.
 - [ ] **Decide on network exposure.** The server binds `0.0.0.0` with no auth, which is
       what makes the Home Assistant integration simple — fine on a trusted LAN, but worth a
       conscious decision rather than a default. At minimum, don't port-forward it.

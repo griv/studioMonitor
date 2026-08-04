@@ -631,10 +631,19 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 let banks = [];
 let vibesData = { vibes: [] };
-let config = { banks: {} };
 let displayState = {};
-let editingVibe = null;   // vibe object being edited (null = new)
 let pendingUploadFiles = null;
+
+// An id, deliberately not an object. renderBanks() and uploadToBank() replace the
+// cached objects wholesale, so a reference captured when a modal opened can be
+// detached by the time it's saved — and the write then lands in an orphan, silently.
+let editingVibeId = null;
+
+// The admin caches banks and vibes at boot. A rename on disk, an upload from
+// another device or a second tab editing all make that stale, so the server sends
+// a monotonic counter in the SSE state and we refetch when it moves.
+let knownLibraryVersion = 0;
+let libraryDirty = false;
 
 const FIT_LABELS = { 'blur-bg': 'BLR', contain: 'CTN', cover: 'CVR', 'ken-burns': 'KB' };
 const FIT_OPTS = [
@@ -645,11 +654,37 @@ const FIT_OPTS = [
   { value: 'ken-burns', label: 'Ken Burns' },
 ];
 
+// A vibe now holds typed sources; these are the ones that name a bank directly.
+const vibeBanks = vibe => (vibe.sources || []).filter(s => s.type === 'bank').map(s => s.value);
+
 // ── API helpers ───────────────────────────────────────────────────────────────
 const api = {
-  get: url => fetch(url).then(r => r.json()),
-  post: (url, body) => fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined }).then(r => r.json()),
-  put: (url, body) => fetch(url, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(r => r.json()),
+  async req(method, url, body) {
+    const res = await fetch(url, {
+      method,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* empty or non-JSON body */ }
+
+    // Mutations echo the resulting library version. Recording it here is what
+    // stops a tab refetching in response to its own write.
+    if (data?.libraryVersion) knownLibraryVersion = Math.max(knownLibraryVersion, data.libraryVersion);
+
+    if (!res.ok) {
+      // Writes used to be fire-and-forget, so a rejected save looked identical to
+      // a successful one. Surface it instead.
+      const msg = data?.error || `${res.status} ${res.statusText}`;
+      toast(msg);
+      throw new Error(msg);
+    }
+    return data;
+  },
+  get:   url => api.req('GET', url),
+  post:  (url, body) => api.req('POST', url, body),
+  patch: (url, body) => api.req('PATCH', url, body),
+  del:   url => api.req('DELETE', url),
 };
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -664,13 +699,37 @@ function toast(msg) {
 
 // ── Load ──────────────────────────────────────────────────────────────────────
 async function loadAll() {
-  [banks, vibesData, config, displayState] = await Promise.all([
+  [banks, vibesData, displayState] = await Promise.all([
     api.get('/api/banks'),
     api.get('/api/vibes'),
-    api.get('/api/config'),
     api.get('/api/status'),
   ]);
+  knownLibraryVersion = displayState.libraryVersion || 0;
   render();
+}
+
+// Called when the server's library version moves past ours. Refetching while a
+// modal is open would pull the ground out from under a form mid-edit, so defer.
+async function refreshLibrary() {
+  if (document.querySelector('#modal-backdrop.open, #prompt-backdrop.open')) {
+    libraryDirty = true;
+    return;
+  }
+  libraryDirty = false;
+  [banks, vibesData] = await Promise.all([api.get('/api/banks'), api.get('/api/vibes')]);
+  knownLibraryVersion = Math.max(knownLibraryVersion, displayState.libraryVersion || 0);
+  renderVibes();
+  renderBanks();
+}
+
+// Our own writes broadcast too. The mutation response records the new version,
+// but it races the SSE event — so wait a beat and re-check before refetching.
+let refreshTimer = null;
+function maybeRefreshLibrary() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    if ((displayState.libraryVersion || 0) > knownLibraryVersion) refreshLibrary();
+  }, 500);
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -787,8 +846,12 @@ function buildBankCard(bank, startOpen) {
   fitLabel.textContent = 'Default fit';
   const fitSel = document.createElement('select');
   fitSel.className = 'fit-select';
-  [{ value: '', label: '— global —' }, { value: 'blur-bg', label: 'Blurred bg' }, { value: 'contain', label: 'Letterbox' }, { value: 'cover', label: 'Fill' }, { value: 'ken-burns', label: 'Ken Burns' }]
-    .forEach(o => { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; fitSel.appendChild(opt); });
+  FIT_OPTS.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.value === '' ? '— global —' : o.label;
+    fitSel.appendChild(opt);
+  });
   fitSel.value = bank.defaultFit || '';
   fitSel.onchange = () => setBankDefaultFit(bank.name, fitSel.value || null);
   fitLabel.appendChild(fitSel);
@@ -803,11 +866,11 @@ function buildBankCard(bank, startOpen) {
   vibesWrap.appendChild(vibesLbl);
 
   vibesData.vibes.forEach(vibe => {
-    const inVibe = vibe.banks.includes(bank.name);
+    const inVibe = vibeBanks(vibe).includes(bank.name);
     const tag = document.createElement('button');
     tag.className = 'vibe-tag' + (inVibe ? ' on' : '');
     tag.textContent = vibe.name;
-    tag.onclick = () => toggleBankInVibe(bank.name, vibe.name, tag);
+    tag.onclick = () => toggleBankInVibe(bank.name, vibe.id, tag);
     vibesWrap.appendChild(tag);
   });
   controls.appendChild(vibesWrap);
@@ -923,52 +986,55 @@ function captureVideoFrame(src) {
 }
 
 // ── Item actions ──────────────────────────────────────────────────────────────
-function ensureBankConfig(bankName) {
-  if (!config.banks) config.banks = {};
-  if (!config.banks[bankName]) config.banks[bankName] = {};
-  if (!config.banks[bankName].items) config.banks[bankName].items = {};
+// Each write is a PATCH of just the changed field. The old whole-document PUT
+// meant two tabs — or a phone and a laptop — silently overwrote each other.
+
+async function patchItem(item, fields) {
+  try {
+    const { item: updated } = await api.patch(`/api/items/${item.id}`, fields);
+    Object.assign(item, updated);   // item is the same object held in `banks`
+    return true;
+  } catch {
+    return false;                   // api.req has already toasted the reason
+  }
 }
 
-function ensureItemConfig(bankName, itemName) {
-  ensureBankConfig(bankName);
-  if (!config.banks[bankName].items[itemName]) config.banks[bankName].items[itemName] = {};
-}
+async function toggleItem(bankName, item, wrap, toggleEl) {
+  const next = !item.enabled;
 
-async function saveConfig() {
-  await api.put('/api/config', config);
-}
-
-function toggleItem(bankName, item, wrap, toggleEl) {
-  ensureItemConfig(bankName, item.name);
-  item.enabled = !item.enabled;
-  config.banks[bankName].items[item.name].enabled = item.enabled;
-  wrap.classList.toggle('enabled', item.enabled);
-  wrap.classList.toggle('disabled', !item.enabled);
-  toggleEl.textContent = item.enabled ? '✓' : '';
-  saveConfig();
+  // Optimistic: the wall reacts over SSE anyway, and waiting on the round trip
+  // makes the grid feel dead on a phone.
+  wrap.classList.toggle('enabled', next);
+  wrap.classList.toggle('disabled', !next);
+  toggleEl.textContent = next ? '✓' : '';
+  item.enabled = next;
   refreshCountLabel(bankName);
+
+  if (!await patchItem(item, { enabled: next })) {
+    wrap.classList.toggle('enabled', !next);
+    wrap.classList.toggle('disabled', next);
+    toggleEl.textContent = !next ? '✓' : '';
+    item.enabled = !next;
+    refreshCountLabel(bankName);
+  }
 }
 
 const FIT_CYCLE = ['', 'blur-bg', 'contain', 'cover', 'ken-burns'];
-function cycleFit(bankName, item, wrap, fitBadge) {
-  ensureItemConfig(bankName, item.name);
-  const cur = item.fit || '';
-  const idx = FIT_CYCLE.indexOf(cur);
+async function cycleFit(bankName, item, wrap, fitBadge) {
+  const idx = FIT_CYCLE.indexOf(item.fit || '');
   const next = FIT_CYCLE[(idx + 1) % FIT_CYCLE.length];
-  item.fit = next || null;
-  config.banks[bankName].items[item.name].fit = next || null;
-  fitBadge.textContent = next ? FIT_LABELS[next] : '·';
-  saveConfig();
-  toast(next ? `Fit: ${next}` : 'Fit: bank default');
+  if (await patchItem(item, { fit: next || null })) {
+    fitBadge.textContent = next ? FIT_LABELS[next] : '·';
+    toast(next ? `Fit: ${next}` : 'Fit: bank default');
+  }
 }
 
-function setBankDefaultFit(bankName, fit) {
-  ensureBankConfig(bankName);
-  config.banks[bankName].defaultFit = fit || null;
-  saveConfig();
-  // Update local bank object too
-  const b = banks.find(b => b.name === bankName);
-  if (b) b.defaultFit = fit;
+async function setBankDefaultFit(bankName, fit) {
+  try {
+    await api.patch(`/api/banks/${encodeURIComponent(bankName)}`, { defaultFit: fit || null });
+    const b = banks.find(b => b.name === bankName);
+    if (b) b.defaultFit = fit || null;
+  } catch { /* toasted */ }
 }
 
 function refreshCountLabel(bankName) {
@@ -982,15 +1048,23 @@ function refreshCountLabel(bankName) {
 }
 
 // ── Vibe membership ───────────────────────────────────────────────────────────
-async function toggleBankInVibe(bankName, vibeName, tagEl) {
-  const vibe = vibesData.vibes.find(v => v.name === vibeName);
+async function toggleBankInVibe(bankName, vibeId, tagEl) {
+  const vibe = vibesData.vibes.find(v => v.id === vibeId);
   if (!vibe) return;
-  const inVibe = vibe.banks.includes(bankName);
-  if (inVibe) vibe.banks = vibe.banks.filter(b => b !== bankName);
-  else vibe.banks.push(bankName);
+
+  const inVibe = vibeBanks(vibe).includes(bankName);
+  const sources = inVibe
+    ? vibe.sources.filter(s => !(s.type === 'bank' && s.value === bankName))
+    : [...vibe.sources, { type: 'bank', value: bankName }];
+
   tagEl.classList.toggle('on', !inVibe);
-  await api.put('/api/vibes', vibesData);
-  toast(inVibe ? `Removed from ${vibeName}` : `Added to ${vibeName}`);
+  try {
+    const { vibe: updated } = await api.patch(`/api/vibes/${vibeId}`, { sources });
+    Object.assign(vibe, updated);
+    toast(inVibe ? `Removed from ${vibe.name}` : `Added to ${vibe.name}`);
+  } catch {
+    tagEl.classList.toggle('on', inVibe);
+  }
 }
 
 // ── Switch display ────────────────────────────────────────────────────────────
@@ -1091,17 +1165,13 @@ document.getElementById('prompt-input').onkeydown = e => {
 };
 
 // ── Vibe modal ────────────────────────────────────────────────────────────────
-function openVibeModal(vibe) {
-  editingVibe = vibe;
-  document.getElementById('modal-title').textContent = vibe ? `Edit — ${vibe.name}` : 'New vibe';
-  document.getElementById('vibe-name-input').value = vibe?.name || '';
-  document.getElementById('vibe-delete-btn').style.display = vibe ? '' : 'none';
-
-  // Banks checkboxes
-  const checksWrap = document.getElementById('vibe-banks-checks');
-  checksWrap.innerHTML = '';
+// Pill multi-select over the bank list. Factored out because the group editor
+// needs exactly the same control.
+function buildBankChecks(container, selectedNames) {
+  const selected = new Set(selectedNames);
+  container.innerHTML = '';
   banks.forEach(b => {
-    const checked = vibe?.banks.includes(b.name) ?? false;
+    const checked = selected.has(b.name);
     const lbl = document.createElement('label');
     lbl.className = 'bank-check-label' + (checked ? ' checked' : '');
     const cb = document.createElement('input');
@@ -1111,8 +1181,17 @@ function openVibeModal(vibe) {
     cb.onchange = () => lbl.classList.toggle('checked', cb.checked);
     lbl.appendChild(cb);
     lbl.appendChild(document.createTextNode(b.name));
-    checksWrap.appendChild(lbl);
+    container.appendChild(lbl);
   });
+}
+
+function openVibeModal(vibe) {
+  editingVibeId = vibe?.id ?? null;
+  document.getElementById('modal-title').textContent = vibe ? `Edit — ${vibe.name}` : 'New vibe';
+  document.getElementById('vibe-name-input').value = vibe?.name || '';
+  document.getElementById('vibe-delete-btn').style.display = vibe ? '' : 'none';
+
+  buildBankChecks(document.getElementById('vibe-banks-checks'), vibe ? vibeBanks(vibe) : []);
 
   const dwell = vibe?.dwellTime ?? 8000;
   const trans = vibe?.transitionDuration ?? 2000;
@@ -1135,50 +1214,61 @@ document.getElementById('trans-range').oninput = e => {
 };
 document.getElementById('shuffle-toggle').onclick = function() { this.classList.toggle('on'); };
 
-document.getElementById('vibe-cancel-btn').onclick = () => {
+document.getElementById('vibe-cancel-btn').onclick = () => closeVibeModal();
+
+function closeVibeModal() {
   document.getElementById('modal-backdrop').classList.remove('open');
-};
+  editingVibeId = null;
+  if (libraryDirty) refreshLibrary();
+}
 
 document.getElementById('vibe-save-btn').onclick = async () => {
   const name = document.getElementById('vibe-name-input').value.trim();
-  if (!name) return;
+  if (!name) return toast('A vibe needs a name');
+
   const selectedBanks = [...document.querySelectorAll('#vibe-banks-checks input:checked')].map(c => c.value);
-  const saved = {
+
+  // Existing non-bank sources survive editing here — the checkbox list only ever
+  // spoke for bank sources, and silently dropping an artist source would be worse
+  // than the whole-document overwrite this replaced.
+  const existing = vibesData.vibes.find(v => v.id === editingVibeId);
+  const kept = (existing?.sources || []).filter(s => s.type !== 'bank');
+
+  const body = {
     name,
-    banks: selectedBanks,
+    sources: [...selectedBanks.map(b => ({ type: 'bank', value: b })), ...kept],
     dwellTime: +document.getElementById('dwell-range').value,
     transitionDuration: +document.getElementById('trans-range').value,
     defaultFit: document.getElementById('vibe-fit-select').value || null,
     shuffle: document.getElementById('shuffle-toggle').classList.contains('on'),
   };
 
-  if (editingVibe) {
-    const idx = vibesData.vibes.findIndex(v => v.name === editingVibe.name);
-    if (idx >= 0) vibesData.vibes[idx] = saved;
-  } else {
-    vibesData.vibes.push(saved);
-  }
+  try {
+    if (editingVibeId) await api.patch(`/api/vibes/${editingVibeId}`, body);
+    else await api.post('/api/vibes', body);
+  } catch { return; }   // already toasted; leave the modal open so the edit isn't lost
 
-  await api.put('/api/vibes', vibesData);
-  document.getElementById('modal-backdrop').classList.remove('open');
+  vibesData = await api.get('/api/vibes');
+  closeVibeModal();
   renderVibes();
   renderBanks();
   toast(`Saved: ${name}`);
 };
 
 document.getElementById('vibe-delete-btn').onclick = async () => {
-  if (!editingVibe) return;
-  vibesData.vibes = vibesData.vibes.filter(v => v.name !== editingVibe.name);
-  await api.put('/api/vibes', vibesData);
-  document.getElementById('modal-backdrop').classList.remove('open');
+  if (!editingVibeId) return;
+  const name = vibesData.vibes.find(v => v.id === editingVibeId)?.name || '';
+  try { await api.del(`/api/vibes/${editingVibeId}`); } catch { return; }
+
+  vibesData = await api.get('/api/vibes');
+  closeVibeModal();
   renderVibes();
   renderBanks();
-  toast(`Deleted: ${editingVibe.name}`);
+  toast(`Deleted: ${name}`);
 };
 
 document.getElementById('modal-backdrop').onclick = e => {
-  if (e.target === document.getElementById('modal-backdrop'))
-    document.getElementById('modal-backdrop').classList.remove('open');
+  if (e.target === document.getElementById('modal-backdrop')) closeVibeModal();
 };
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
@@ -1189,6 +1279,11 @@ function connectSSE() {
       displayState = JSON.parse(e.data);
       renderNowPlaying();
       renderVibes();
+
+      // Deliberately not renderBanks() on every event — the server broadcasts on
+      // each file change, and rebuilding the grid re-runs video frame capture for
+      // every video in it. Only refetch when the library actually moved.
+      if ((displayState.libraryVersion || 0) > knownLibraryVersion) maybeRefreshLibrary();
     } catch {}
   });
   es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };

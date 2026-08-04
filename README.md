@@ -56,31 +56,47 @@ Uploads through the admin page are capped at 500 MB per file.
 
 Media is gitignored — it's content, not code.
 
+Everything the filesystem doesn't say — which items are enabled, what fits them, who made
+them — lives in `data/studio.db`. The filesystem stays the source of truth for what media
+*exists*; the database only annotates it, and reconciles on boot and on every change.
+
 ### Vibes
 
-A vibe is a named preset combining one or more banks with their own playback settings.
-Defined in [`vibes.json`](vibes.json):
+A vibe is a named preset combining one or more **sources** with its own playback settings.
+A source is a bank, a group of banks, or an artist:
 
 ```json
 {
-  "vibes": [
-    {
-      "name": "studio",
-      "banks": ["invisibleOutfields"],
-      "dwellTime": 8000,
-      "transitionDuration": 2000,
-      "shuffle": false,
-      "defaultFit": "contain"
-    }
-  ]
+  "name": "studio",
+  "sources": [
+    { "type": "group",  "value": "inspiration" },
+    { "type": "bank",   "value": "invisibleOutfields" },
+    { "type": "artist", "value": "Agnes Martin" }
+  ],
+  "dwellTime": 8000,
+  "transitionDuration": 2000,
+  "shuffle": false,
+  "defaultFit": "contain"
 }
 ```
 
-Selecting a vibe loads every enabled item from all its banks and applies its settings.
-Everything except `name` and `banks` is optional and falls back to the current session settings.
+Sources resolve in order and are deduplicated by item, so a bank named directly *and*
+reached through a group contributes once. An artist source matches across every bank,
+including items that inherit the artist from their bank's default.
 
-> The fit key is **`defaultFit`**, not `objectFit`. The admin UI writes the right one;
-> hand-edited files sometimes don't, and the wrong key fails silently.
+Everything except `name` and `sources` is optional and falls back to the session settings.
+A source whose target no longer exists resolves to nothing and is reported as unresolved —
+it never makes a vibe unplayable.
+
+### Attribution
+
+Each item carries `title`, `artist`, `year`, `medium` and `source` (a URL, stored but never
+shown on the wall). Banks carry defaults for the same fields, which items inherit unless
+they set their own — useful when a whole bank is one artist.
+
+The distinction matters in two directions: the display resolves to the effective value,
+while the admin editor shows the item's own value, so an empty field reads as "inheriting"
+rather than baking the bank default in the first time you save.
 
 ### Fits
 
@@ -113,45 +129,54 @@ Phone-first, at `/admin`.
 - Drag-and-drop upload, including onto a new bank
 - Create and edit vibes — pick banks, set dwell, transition, shuffle, fit
 
-Item state written here lands in [`media-config.json`](media-config.json):
-
-```json
-{
-  "banks": {
-    "invisibleOutfields": {
-      "defaultFit": "blur-bg",
-      "items": { "IMG_1694.mov": { "enabled": true, "fit": "cover" } }
-    }
-  }
-}
-```
-
-Items are enabled unless explicitly set to `false`, so the file only records deviations
-from the default — an untouched bank has no entry at all.
+Every edit is a PATCH of just the field that changed, so two tabs — or a phone and a
+laptop — no longer overwrite each other's work.
 
 ## API
 
 Enough surface to drive everything from Home Assistant or `curl`.
 
+**Playback** — these are the Home Assistant contract and key on *name*:
+
 | Method | Route | Purpose |
 |---|---|---|
 | `GET` | `/api/events` | SSE stream; emits `state` on every change |
 | `GET` | `/api/status` | Current state snapshot |
-| `GET` | `/api/banks` | Banks with all items, including disabled ones |
-| `GET`&nbsp;/&nbsp;`PUT` | `/api/vibes` | Read / replace `vibes.json` |
-| `GET`&nbsp;/&nbsp;`PUT` | `/api/config` | Read / replace `media-config.json` |
 | `POST` | `/api/bank/:name` | Play a bank |
 | `POST` | `/api/vibe/:name` | Play a vibe |
-| `POST` | `/api/settings` | Patch `dwellTime`, `transitionDuration`, `shuffle`, `objectFit` |
+| `POST` | `/api/settings` | Patch `dwellTime`, `transitionDuration`, `shuffle`, `objectFit`, `captionMode`, `captionHoldMs` |
+
+**Library** — these key on *id*, so renaming isn't a delete-and-recreate:
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/banks` | Banks with all items, including disabled ones |
+| `PATCH` | `/api/items/:id` | Partial: `enabled`, `fit`, `objectPosition`, `title`, `artist`, `year`, `medium`, `source` |
+| `PATCH` | `/api/banks/:name` | Partial: `kind`, `defaultFit`, `default{Artist,Year,Medium,Source}`, `captionMode` |
+| `GET` | `/api/artists` | Distinct artists with counts |
+| `GET` `POST` `PATCH` `DELETE` | `/api/vibes[/:id]` | Vibe CRUD; PATCH may replace `sources` |
+| `GET` `POST` `PATCH` `DELETE` | `/api/groups[/:id]` | Group CRUD |
+| `POST` | `/api/resolve/preview` | `{sources}` → `{count, unresolved}`, for a live count while editing |
 | `POST` | `/api/upload/:bank` | Multipart upload, field `files`; creates the bank if new |
+| `GET` | `/api/export` | The whole library as JSON — back this up |
 
 ```sh
 curl -X POST http://studio:3000/api/vibe/studio
 curl -X POST http://studio:3000/api/settings \
   -H 'Content-Type: application/json' -d '{"dwellTime": 15000}'
+curl -X PATCH http://studio:3000/api/items/42 \
+  -H 'Content-Type: application/json' -d '{"artist": "Agnes Martin", "year": "1973"}'
 ```
 
-State lives in memory only — a restart falls back to the first bank alphabetically.
+Unknown keys are ignored — a slightly stale client shouldn't fail — but bad values for
+known keys are rejected with a reason.
+
+Every mutating response carries the resulting `libraryVersion`, which also rides in the SSE
+state. That's how a client tells its own write apart from someone else's and knows when its
+cached view has gone stale.
+
+Playback position lives in memory only — a restart falls back to the first bank
+alphabetically.
 
 ## Deployment
 
@@ -181,12 +206,16 @@ Set `UBUNTU_IP` to the server's address.
 | [`server.js`](server.js) | Express server, SSE broadcast, file watcher, upload handling |
 | [`public/index.html`](public/index.html) | The display — slide building, transitions, Ken Burns |
 | [`public/admin.html`](public/admin.html) | Admin UI |
+| [`lib/`](lib/) | `db` · `schema` · `scan` (reconciliation) · `library` · `resolve` · `validate` |
 | [`deploy/`](deploy/) | systemd unit, kiosk script, install and update scripts |
-| `vibes.json` | Vibe definitions — device state, gitignored, seeded from `vibes.example.json` |
-| `media-config.json` | Per-item enable/fit state — same, from `media-config.example.json` |
+| `data/studio.db` | The library — device state, gitignored |
 | [`media/`](media/) | Banks — gitignored |
 
-`vibes.json` and `media-config.json` are rewritten by the admin UI, so they're kept out of
-git; otherwise every `git pull` on the display machine collides with them.
+`data/` and `media/` are device state and stay out of git, so `git pull` on the display
+machine never collides with them. Any pre-SQLite `vibes.json` / `media-config.json` is
+imported automatically on first run and renamed to `.migrated`.
+
+**Back up `data/`.** The media can be re-copied from anywhere; hand-typed attribution
+can't. `GET /api/export` dumps the lot as JSON.
 
 Planned work and known rough edges: [TODO.md](TODO.md).

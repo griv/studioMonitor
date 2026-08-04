@@ -19,15 +19,30 @@ const db = require('./lib/db');
 const { scanLibrary, SUPPORTED } = require('./lib/scan');
 const lib = require('./lib/library');
 const { resolveSources, shuffle, preserveOrder } = require('./lib/resolve');
+const {
+  pick, ValidationError, SAFE_NAME,
+  ITEM_SPEC, BANK_SPEC, VIBE_SPEC, GROUP_SPEC, SETTINGS_SPEC,
+} = require('./lib/validate');
 
 const PORT = process.env.PORT || 3000;
 const MEDIA_DIR = process.env.MEDIA_DIR || path.join(__dirname, 'media');
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'data', 'studio.db');
 
-const SAFE_NAME = /^[a-zA-Z0-9_\-. ]+$/;
-
 const app = express();
 app.use(express.json());
+
+// Every mutating response carries the resulting library version, so the client
+// that made the change can recognise the SSE broadcast it just caused and skip
+// refetching — otherwise each tap would rebuild the whole thumbnail grid.
+app.use((req, res, next) => {
+  if (req.method === 'GET') return next();
+  const json = res.json.bind(res);
+  res.json = body => json(
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? { ...body, libraryVersion: db.getLibraryVersion() }
+      : body);
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/media', express.static(MEDIA_DIR));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
@@ -39,7 +54,14 @@ let state = {
   currentBank: null,
   currentVibe: null,
   mediaList: [],
-  settings: { dwellTime: 8000, transitionDuration: 2000, shuffle: false, objectFit: 'blur-bg' },
+  settings: {
+    dwellTime: 8000,
+    transitionDuration: 2000,
+    shuffle: false,
+    objectFit: 'blur-bg',
+    captionMode: 'collection',   // consumed by the display in Step 4
+    captionHoldMs: 6000,
+  },
   libraryVersion: 0,
 };
 
@@ -130,25 +152,138 @@ app.get('/api/status', (req, res) => {
 });
 
 app.get('/api/banks', (req, res) => res.json(lib.listBanksForAdmin()));
+app.get('/api/artists', (req, res) => res.json(lib.listArtists()));
+app.get('/api/groups', (req, res) => res.json(lib.listGroups()));
+app.get('/api/vibes', (req, res) => res.json({ vibes: lib.listVibes() }));
+app.get('/api/export', (req, res) => res.json(lib.exportAll()));
 
-// Whole-document endpoints, kept only so admin.html is untouched while the store
-// changes underneath it. Step 2 replaces them with per-field PATCH and deletes these.
-app.get('/api/vibes', (req, res) => res.json(lib.vibesDoc()));
+// Small wrapper so every mutating route reports validation failures the same way.
+function validated(spec, handler) {
+  return (req, res) => {
+    let fields;
+    try {
+      fields = pick(req.body, spec);
+    } catch (err) {
+      if (err instanceof ValidationError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+    return handler(req, res, fields);
+  };
+}
 
-app.put('/api/vibes', (req, res) => {
-  const { vibes } = req.body;
-  if (!Array.isArray(vibes)) return res.status(400).json({ error: 'vibes must be array' });
-  lib.applyVibesDoc({ vibes });
+const asId = v => (/^\d+$/.test(String(v)) ? Number(v) : null);
+
+// ── Items ─────────────────────────────────────────────────────────────────────
+// Per-field PATCH, so two phones editing different items no longer overwrite each
+// other the way the whole-document PUT did.
+
+app.patch('/api/items/:id', validated(ITEM_SPEC, (req, res, fields) => {
+  const id = asId(req.params.id);
+  if (id === null) return res.status(400).json({ error: 'Invalid item id' });
+  if (!Object.keys(fields).length) return res.status(400).json({ error: 'No recognised fields' });
+  if (!lib.patchItem(id, fields)) return res.status(404).json({ error: 'Item not found' });
+  refreshMediaList();
+  res.json({ ok: true, item: lib.getItem(id) });
+}));
+
+// ── Banks ─────────────────────────────────────────────────────────────────────
+
+app.patch('/api/banks/:name', validated(BANK_SPEC, (req, res, fields) => {
+  const { name } = req.params;
+  if (!SAFE_NAME.test(name)) return res.status(400).json({ error: 'Invalid bank name' });
+  if (!Object.keys(fields).length) return res.status(400).json({ error: 'No recognised fields' });
+  if (!lib.patchBank(name, fields)) return res.status(404).json({ error: 'Bank not found' });
+  refreshMediaList();
+  res.json({ ok: true });
+}));
+
+// ── Vibes ─────────────────────────────────────────────────────────────────────
+// Mutations key on id so renaming isn't a delete-and-recreate. Playback keys on
+// name, because that is what Home Assistant sends.
+
+app.post('/api/vibes', validated(VIBE_SPEC, (req, res, fields) => {
+  if (!fields.name) return res.status(400).json({ error: 'name is required' });
+  try {
+    const id = lib.upsertVibe(fields);
+    res.json({ ok: true, vibe: lib.listVibes().find(v => v.id === id) });
+  } catch (err) {
+    res.status(409).json({ error: `A vibe called "${fields.name}" already exists` });
+  }
+}));
+
+app.patch('/api/vibes/:id', validated(VIBE_SPEC, (req, res, fields) => {
+  const id = asId(req.params.id);
+  const existing = id === null ? null : lib.listVibes().find(v => v.id === id);
+  if (!existing) return res.status(404).json({ error: 'Vibe not found' });
+
+  const merged = { ...existing, ...fields, id };
+  try {
+    lib.upsertVibe(merged);
+  } catch {
+    return res.status(409).json({ error: `A vibe called "${fields.name}" already exists` });
+  }
+
+  // Keep the wall in step if the vibe being edited is the one playing.
+  if (state.mode === 'vibe' && state.currentVibe === existing.name) {
+    state.currentVibe = merged.name;
+    refreshMediaList();
+  }
+  res.json({ ok: true, vibe: lib.listVibes().find(v => v.id === id) });
+}));
+
+app.delete('/api/vibes/:id', (req, res) => {
+  const id = asId(req.params.id);
+  if (id === null || !lib.deleteVibe(id)) return res.status(404).json({ error: 'Vibe not found' });
+  res.json({ ok: true });
+});
+
+// ── Groups ────────────────────────────────────────────────────────────────────
+
+app.post('/api/groups', validated(GROUP_SPEC, (req, res, fields) => {
+  if (!fields.name) return res.status(400).json({ error: 'name is required' });
+  try {
+    const id = lib.upsertGroup(fields);
+    res.json({ ok: true, group: lib.listGroups().find(g => g.id === id) });
+  } catch {
+    res.status(409).json({ error: `A group called "${fields.name}" already exists` });
+  }
+}));
+
+app.patch('/api/groups/:id', validated(GROUP_SPEC, (req, res, fields) => {
+  const id = asId(req.params.id);
+  const existing = id === null ? null : lib.listGroups().find(g => g.id === id);
+  if (!existing) return res.status(404).json({ error: 'Group not found' });
+  try {
+    lib.upsertGroup({ ...existing, ...fields, id });
+  } catch {
+    return res.status(409).json({ error: `A group called "${fields.name}" already exists` });
+  }
+  refreshMediaList();
+  res.json({ ok: true, group: lib.listGroups().find(g => g.id === id) });
+}));
+
+app.delete('/api/groups/:id', (req, res) => {
+  const id = asId(req.params.id);
+  if (id === null || !lib.deleteGroup(id)) return res.status(404).json({ error: 'Group not found' });
   refreshMediaList();
   res.json({ ok: true });
 });
 
-app.get('/api/config', (req, res) => res.json(lib.configDoc()));
+// ── Source preview ────────────────────────────────────────────────────────────
+// Lets the vibe editor show a live item count. Artist resolution can't be done
+// client-side, and the difference between "12 items" and guessing is the
+// difference between confidently editing a vibe and not.
 
-app.put('/api/config', (req, res) => {
-  lib.applyConfigDoc(req.body);
-  refreshMediaList();
-  res.json({ ok: true });
+app.post('/api/resolve/preview', (req, res) => {
+  let sources;
+  try {
+    ({ sources } = pick(req.body, { sources: VIBE_SPEC.sources }));
+  } catch (err) {
+    if (err instanceof ValidationError) return res.status(400).json({ error: err.message });
+    throw err;
+  }
+  const { items, unresolved } = resolveSources(sources || []);
+  res.json({ count: items.length, unresolved });
 });
 
 app.post('/api/bank/:name', (req, res) => {
@@ -187,16 +322,19 @@ app.post('/api/vibe/:name', (req, res) => {
     transitionDuration: vibe.transitionDuration ?? state.settings.transitionDuration,
     shuffle: doShuffle,
     objectFit: vibe.defaultFit ?? state.settings.objectFit,
+    captionMode: vibe.captionMode ?? state.settings.captionMode,
+    captionHoldMs: vibe.captionHoldMs ?? state.settings.captionHoldMs,
   };
   broadcast();
   res.json({ ok: true, state, unresolved });
 });
 
-app.post('/api/settings', (req, res) => {
-  state.settings = { ...state.settings, ...req.body };
+app.post('/api/settings', validated(SETTINGS_SPEC, (req, res, fields) => {
+  if (!Object.keys(fields).length) return res.status(400).json({ error: 'No recognised settings' });
+  state.settings = { ...state.settings, ...fields };
   broadcast();
   res.json({ ok: true, settings: state.settings });
-});
+}));
 
 app.post('/api/upload/:bank', upload.array('files'), (req, res) => {
   if (!req.files?.length) return res.status(400).json({ error: 'No files uploaded' });
