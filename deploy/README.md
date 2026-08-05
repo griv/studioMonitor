@@ -62,22 +62,36 @@ file in `sources.list.d/`, add `Enabled: no` to the stanza or delete the file. T
 
 ### If the install fails
 
-Almost always Node. `install.sh` pulls Node 24 from NodeSource, which needs a
-release NodeSource still builds for. Check what you're on:
+Almost always Node. The requirement is a capability, not a version: `node:sqlite`
+has to load without a flag. Check directly:
 
 ```sh
-lsb_release -a && node --version
+node -e 'require("node:sqlite"); console.log("ok")'
+which npm
 ```
 
-22.04 and 24.04 are fine. On something older, upgrade the OS rather than pinning
-an older Node — the library needs `node:sqlite`, which doesn't exist before 22
-and isn't unflagged before 24.
+If that prints `ok`, the distro's Node is fine and `install.sh` will use it —
+which is the better outcome, since security updates then arrive through apt with
+no third-party repository on a machine that runs for years. Ubuntu's package
+sometimes omits npm; the installer adds it.
+
+If it fails, the installer falls back to Node 24 from NodeSource. When *that*
+doesn't take, apt couldn't read the repository — check in this order:
+
+```sh
+sudo apt update                 # any Err: or E: lines?
+apt-cache policy nodejs         # which repos offer it, at what versions?
+ls /etc/apt/sources.list.d/     # is nodesource listed at all?
+```
+
+Node 20 and earlier can't do this at all, and no flag helps — `node:sqlite`
+simply isn't there.
 
 ## What it sets up
 
 | | |
 |---|---|
-| Node.js | Current LTS from NodeSource (Ubuntu's own package is usually too old) |
+| Node.js | The distro's own, if it can load `node:sqlite`; otherwise NodeSource |
 | `studio-monitor.service` | The server, `Restart=always`, enabled at boot |
 | `~/.config/autostart/studio-kiosk.desktop` | Launches `kiosk.sh` with the XFCE session |
 | LightDM auto-login | So a power cut doesn't leave the wall on a login prompt |

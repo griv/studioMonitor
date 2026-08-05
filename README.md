@@ -17,8 +17,9 @@ through Home Assistant.
 
 ## Running it
 
-Needs **Node 24 or newer** — the library is stored in SQLite via `node:sqlite`, which is
-only available unflagged from 24. There's an `.nvmrc`, so `nvm use` picks it up.
+Needs a Node that can load **`node:sqlite`** without a flag — that's where the library
+lives. In practice: **22.5 or newer**, though 22.x prints an experimental warning on
+startup and 24+ doesn't. Verified on both. There's an `.nvmrc` pinning 24 for development.
 
 ```sh
 nvm use

@@ -4,7 +4,8 @@
 try {
   require('node:sqlite');
 } catch {
-  console.error(`Studio Monitor needs Node 24 or newer — running ${process.version}.`);
+  console.error(`Studio Monitor needs a Node that can load node:sqlite unflagged — running ${process.version}.`);
+  console.error('It arrived in 22.5 behind --experimental-sqlite and is unflagged from 24.');
   console.error('On the display machine: re-run ./deploy/install.sh. Locally: nvm use.');
   process.exit(1);
 }

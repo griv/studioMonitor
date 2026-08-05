@@ -41,39 +41,50 @@ sudo apt-get update -qq || echo "    (apt update reported errors — continuing)
 sudo apt-get install -y curl git ca-certificates unclutter x11-xserver-utils
 
 step "Node.js"
-node_ok() {
-  command -v node >/dev/null \
-    && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge "$NODE_MAJOR" ]
-}
+
+# The requirement isn't a version number, it's whether node:sqlite loads without
+# a flag. It arrived in 22.5 behind --experimental-sqlite and is unflagged from
+# 24, but distro builds vary — and if the distro's own Node can do it, that's the
+# better answer: security updates arrive through apt, with no third-party repo on
+# a machine that sits powered on for years.
+has_sqlite() { command -v node >/dev/null && node -e 'require("node:sqlite")' >/dev/null 2>&1; }
+node_ok()    { has_sqlite && command -v npm >/dev/null; }
+
+if has_sqlite && ! command -v npm >/dev/null; then
+  echo "    $(node --version) can do node:sqlite; installing npm alongside it"
+  sudo apt-get install -y npm || true
+fi
 
 if ! node_ok; then
-  # Ubuntu's packaged node is too old and, unlike NodeSource's, doesn't bundle npm.
+  echo "    installing Node ${NODE_MAJOR} from NodeSource"
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | sudo -E bash -
   sudo apt-get install -y nodejs
 fi
 
-# Verify rather than assume. If apt couldn't read the NodeSource repository it
-# silently installs Ubuntu's nodejs instead, and the first symptom is
+# Verify rather than assume. If apt can't read the NodeSource repo it silently
+# leaves the distro's Node in place, and the first symptom used to be
 # "npm: command not found" several steps later, which points nowhere useful.
 if ! node_ok; then
   cat <<EOF
 
-Node ${NODE_MAJOR}+ is required, but $(node --version 2>/dev/null || echo "nothing") is installed.
+This needs a Node that can load node:sqlite unflagged, plus npm.
 
-apt almost certainly could not read the NodeSource repository, and fell back to
-Ubuntu's own nodejs package — which is too old and ships without npm.
+  node:     $(node --version 2>/dev/null || echo "not installed")
+  npm:      $(npm --version 2>/dev/null || echo "not installed")
+  sqlite:   $(has_sqlite && echo "available" || echo "NOT available")
 
-That usually means 'apt-get update' is failing on an unrelated stale source. The
-Ubuntu installer's CD-ROM entry is the common culprit. Find it with:
+Node ${NODE_MAJOR} from NodeSource satisfies this. If it didn't install, apt
+probably couldn't read the NodeSource repository. Worth checking, in order:
 
-  grep -rn cdrom /etc/apt/sources.list /etc/apt/sources.list.d/
+  sudo apt update                 # any Err: or E: lines?
+  apt-cache policy nodejs         # which repos offer it, at what versions?
+  ls /etc/apt/sources.list.d/     # is nodesource listed at all?
 
-Comment out or delete the offending entry, confirm 'sudo apt update' comes back
-clean, then re-run this script.
+Fix whatever that turns up and re-run this script.
 EOF
   exit 1
 fi
-echo "    $(node --version), npm $(npm --version) at $(command -v node)"
+echo "    $(node --version), npm $(npm --version) — node:sqlite available"
 
 step "Browser"
 if ! command -v chromium-browser >/dev/null && ! command -v chromium >/dev/null; then
