@@ -24,10 +24,19 @@ step() { echo; echo "==> $*"; }
 
 # ── Packages ────────────────────────────────────────────────────────────────
 step "Base packages"
-# A stale entry — the installer's cdrom source is the usual one — makes apt-get
-# update exit non-zero even when every repo we actually need is fine. Don't let
-# that abort the install; the install step below fails loudly if a package really
-# can't be fetched.
+
+# The Ubuntu installer leaves a dead file:/cdrom source behind on a fresh install.
+# It makes every apt-get update exit non-zero, which in turn stops NodeSource's
+# setup script from registering its repository — so apt quietly falls back to
+# Ubuntu's nodejs, which is too old and has no npm. Comment it out rather than
+# delete it, so the change is obvious and trivially reversible.
+if grep -qs '^[^#].*cdrom' /etc/apt/sources.list; then
+  echo "    disabling the installer's dead file:/cdrom source"
+  sudo sed -i '/cdrom/s/^[^#]/#&/' /etc/apt/sources.list
+fi
+
+# Still tolerate a non-zero exit — there may be other stale sources we shouldn't
+# touch. The Node check below is what actually catches the consequences.
 sudo apt-get update -qq || echo "    (apt update reported errors — continuing)"
 sudo apt-get install -y curl git ca-certificates unclutter x11-xserver-utils
 
