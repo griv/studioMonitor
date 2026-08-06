@@ -131,11 +131,21 @@ sudo visudo -cf /etc/sudoers.d/studio-monitor >/dev/null \
 
 # ── Kiosk on login ──────────────────────────────────────────────────────────
 step "Kiosk autostart"
-chmod +x deploy/kiosk.sh deploy/update.sh
+chmod +x deploy/kiosk.sh deploy/update.sh deploy/doctor.sh
 mkdir -p "$HOME/.config/autostart"
 sed -e "s|__DIR__|$REPO_DIR|g" \
   deploy/studio-kiosk.desktop > "$HOME/.config/autostart/studio-kiosk.desktop"
-echo "    $HOME/.config/autostart/studio-kiosk.desktop"
+
+# Verify rather than assume. This is the one step whose failure is silent on the
+# wall: the box still boots, logs in and rotates the panel, and simply never
+# launches a browser — which looks like a browser problem and isn't one.
+KIOSK_EXEC="$(sed -n 's/^Exec=//p' "$HOME/.config/autostart/studio-kiosk.desktop" | head -1)"
+if [ -x "${KIOSK_EXEC%% *}" ]; then
+  echo "    $HOME/.config/autostart/studio-kiosk.desktop → $KIOSK_EXEC"
+else
+  echo "    FAILED to write a usable autostart entry (Exec=$KIOSK_EXEC)" >&2
+  exit 1
+fi
 
 # ── Auto-login ──────────────────────────────────────────────────────────────
 step "LightDM auto-login"
@@ -170,8 +180,14 @@ Updating later:
 
   cd $REPO_DIR && ./deploy/update.sh --kiosk
 
+If anything doesn't come up after that reboot, ask what broke rather than
+guessing — it checks the whole chain and repairs the autostart entry:
+
+  cd $REPO_DIR && ./deploy/doctor.sh
+
 Logs:
 
   journalctl -u studio-monitor -f
+  tail -f ${XDG_STATE_HOME:-\$HOME/.local/state}/studio-kiosk.log
 ────────────────────────────────────────────────────────────
 EOF

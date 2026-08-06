@@ -97,6 +97,10 @@ simply isn't there.
 | LightDM auto-login | So a power cut doesn't leave the wall on a login prompt |
 | `/etc/sudoers.d/studio-monitor` | Lets `update.sh` restart the service without a password |
 
+The installer verifies the autostart entry before reporting success — it's the
+one step whose failure is silent on the wall, since the box still boots, logs in
+and rotates while never launching a browser.
+
 The two layers are deliberately separate: the **server** is a systemd service
 that comes up with the machine, and the **browser** is a session process that
 comes up with the desktop. The server doesn't need X, and the kiosk waits up to
@@ -167,14 +171,56 @@ section of [TODO.md](../TODO.md).
 
 ## Troubleshooting
 
+Start here rather than guessing. It walks the whole chain — server, browser,
+autostart entry, auto-login, X session — and names the broken link:
+
+```sh
+cd ~/studioMonitor && ./deploy/doctor.sh
+./deploy/doctor.sh --repair     # also fixes what lives in $HOME
+```
+
+It works over SSH; the checks that need a display are skipped rather than
+reported as failures. `--repair` rewrites the autostart entry and makes the
+scripts executable, but deliberately won't install a systemd unit or touch
+LightDM — if those are missing the answer is to re-run `install.sh`, and quietly
+half-installing from here would hide that.
+
+### The rotation is right but no browser appears
+
+The most common shape of this, and the most misleading: the panel is portrait,
+so the session is clearly starting, yet nothing launches. The rotation is *not*
+evidence that `kiosk.sh` ran — XFCE persists display settings itself, so the
+panel comes up rotated whether or not anything else did.
+
+`install.sh` writes the autostart entry near the end, after Node, `npm ci` and
+the systemd unit. Anything that aborts it earlier leaves a box that boots, logs
+in and rotates, and never launches a browser. Check for the entry directly:
+
+```sh
+ls -l ~/.config/autostart/studio-kiosk.desktop
+```
+
+`doctor.sh --repair` writes it without re-running the whole install. Other ways
+this same symptom shows up, all of which `doctor.sh` names: an `Exec=` line
+still containing a literal `__DIR__`, an `Exec=` pointing at a checkout that has
+since moved, or `Hidden=true` — which is what XFCE's *Session and Startup* adds
+when the entry is unchecked there, leaving a file that looks perfectly correct
+while doing nothing.
+
+### Logs
+
 ```sh
 systemctl status studio-monitor      # is the server up
 journalctl -u studio-monitor -f      # server logs
+tail -f ~/.local/state/studio-kiosk.log   # rotation, server wait, browser restarts
 curl -s localhost:3000/api/status    # what it thinks it's playing
 xrandr --query                       # output names and current rotation
 ```
 
-Kiosk output goes to the X session log, `~/.xsession-errors`, prefixed `[kiosk]`.
+`kiosk.sh` writes to `~/.local/state/studio-kiosk.log` (`$XDG_STATE_HOME` if set),
+capturing the browser's stderr as well as its own. An autostart entry's stdout
+goes nowhere in particular, which is precisely why a browser that never launched
+used to leave no trace. Run by hand it prints to the terminal as well.
 
 To get a normal desktop back for debugging, kill the browser — but note the
 loop in `kiosk.sh` will restart it in 3s. Rename the autostart entry and log out

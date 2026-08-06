@@ -14,7 +14,25 @@ URL="${STUDIO_URL:-http://localhost:3000/}"
 ROTATE="${STUDIO_ROTATE:-left}"
 PROFILE="${HOME}/.config/studio-kiosk"
 
-log() { echo "[kiosk $(date +%H:%M:%S)] $*"; }
+# ── Logging ─────────────────────────────────────────────────────────────────
+# An autostart entry's stdout goes to nowhere in particular, which is exactly
+# why "the browser didn't come up" is impossible to diagnose on a box whose
+# only interface is the wall it failed to draw. Keep it somewhere findable.
+LOG_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/studio-kiosk.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+
+# Truncate rather than rotate. This loops for months and the browser is chatty on
+# stderr; nobody is ever going to want the second-most-recent boot. Appending
+# (>>) means truncation is safe while the redirect is live.
+trim_log() { [ -f "$LOG_FILE" ] && [ "$(wc -c <"$LOG_FILE")" -gt 2000000 ] && : >"$LOG_FILE"; }
+trim_log
+
+# Run by hand — checking rotation, say — you want to see it happen. Run by the
+# autostart entry there is no terminal to see it on, only the file.
+if [ -t 1 ]; then exec > >(tee -a "$LOG_FILE") 2>&1; else exec >>"$LOG_FILE" 2>&1; fi
+
+log() { echo "[kiosk $(date '+%F %H:%M:%S')] $*"; }
+log "── starting ── url=$URL rotate=$ROTATE session=${XDG_SESSION_TYPE:-unknown} display=${DISPLAY:-unset}"
 
 # ── Portrait ────────────────────────────────────────────────────────────────
 # Rotating a 1920x1080 panel gives a 1080x1920 framebuffer. `left` vs `right`
@@ -49,10 +67,15 @@ fi
 
 # ── Wait for the server ─────────────────────────────────────────────────────
 log "waiting for $URL"
+served=0
 for _ in $(seq 1 60); do
-  curl -sf -o /dev/null "$URL" && break
+  if curl -sf -o /dev/null "$URL"; then served=1; break; fi
   sleep 1
 done
+# Carry on either way — the browser's own retry loop is a better place to wait
+# than here — but say so, because "blank screen" and "blank page" look identical
+# on the wall and have completely different causes.
+[ "$served" -eq 1 ] || log "WARNING: $URL never answered in 60s (systemctl status studio-monitor)"
 
 # ── Pick a browser ──────────────────────────────────────────────────────────
 BROWSER=""
@@ -77,6 +100,8 @@ log "using $BROWSER"
 mkdir -p "$PROFILE"
 
 while true; do
+  trim_log
+
   # Suppress the "Chrome didn't shut down correctly" restore bar after a power cut.
   sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/' \
     "$PROFILE/Default/Preferences" 2>/dev/null || true
