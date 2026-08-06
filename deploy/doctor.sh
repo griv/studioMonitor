@@ -77,10 +77,25 @@ for b in chromium-browser chromium google-chrome-stable google-chrome firefox; d
   if command -v "$b" >/dev/null; then BROWSER="$b"; break; fi
 done
 if [ -n "$BROWSER" ]; then
-  ok "$BROWSER installed"
+  if command -v snap >/dev/null && snap list chromium >/dev/null 2>&1; then
+    ok "$BROWSER installed (snap)"
+  else
+    ok "$BROWSER installed"
+  fi
 else
   bad "no browser installed" "sudo apt-get install -y chromium-browser"
 fi
+
+# A snap-confined chromium can only write non-hidden paths under $HOME, so a
+# profile in a dotdir aborts every launch. kiosk.sh defaults correctly; this
+# catches a STUDIO_PROFILE override that would reintroduce it.
+PROFILE="${STUDIO_PROFILE:-$HOME/studio-kiosk}"
+case "${PROFILE#"$HOME"/}" in
+  .*) if command -v snap >/dev/null && snap list chromium >/dev/null 2>&1; then
+        bad "profile $PROFILE is a hidden path the chromium snap cannot write to" \
+            "unset STUDIO_PROFILE, or set one without a leading dot"
+      fi ;;
+esac
 
 # ── Kiosk autostart ─────────────────────────────────────────────────────────
 # The most likely thing to be missing, and the least likely to announce itself:
@@ -171,8 +186,37 @@ fi
 head_ "Kiosk log"
 if [ -f "$LOG_FILE" ]; then
   ok "$LOG_FILE"
+
+  # Read it, don't just print it. Printing the log and then reporting "All good"
+  # over a browser that had been restarting every 3 seconds is precisely the
+  # failure this script exists to prevent.
+  #
+  # Scoped to the current run — kiosk.sh writes a banner at each launch — so a
+  # fault that has since been fixed stops being reported instead of lingering
+  # until it scrolls out of the file.
+  SESSION="$(awk '/── starting ──/ {buf = ""} {buf = buf $0 ORS} END {printf "%s", buf}' "$LOG_FILE")"
+  [ -n "$SESSION" ] || SESSION="$(tail -60 "$LOG_FILE")"
+
+  restarts="$(printf '%s' "$SESSION" | grep -c 'browser exited; restarting')"
+  if [ "$restarts" -ge 3 ]; then
+    bad "browser is crash-looping — $restarts restarts this session" \
+        "the errors printed just above each restart say why"
+  fi
+
+  # The specific one worth naming, because the message chromium prints describes
+  # a consequence and not the cause: snap's home interface grants @{HOME}/[^.]**,
+  # so a profile under ~/.config can never be locked.
+  if printf '%s' "$SESSION" | grep -q 'SingletonLock.*Permission denied'; then
+    bad "chromium can't lock its profile — the snap is denied hidden paths under \$HOME" \
+        "cd $REPO_DIR && ./deploy/update.sh --kiosk    # moves the profile out of ~/.config"
+  fi
+
+  if printf '%s' "$SESSION" | grep -q 'never answered in 60s'; then
+    warn "the kiosk gave up waiting for the server" "journalctl -u studio-monitor -n 50"
+  fi
+
   if [ "$QUIET" -eq 0 ]; then
-    sed 's/^/        /' "$LOG_FILE" | tail -12
+    printf '%s' "$SESSION" | tail -12 | sed 's/^/        /'
   fi
 else
   # Absence is itself the finding: kiosk.sh writes this the moment it starts, so

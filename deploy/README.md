@@ -146,7 +146,9 @@ and put the same value in the `Exec=` line of
 `~/.config/autostart/studio-kiosk.desktop`, or export it from `~/.profile`.
 
 Other knobs: `STUDIO_OUTPUT` (defaults to the first connected output — set it
-explicitly if the box has more than one plugged in) and `STUDIO_URL`.
+explicitly if the box has more than one plugged in), `STUDIO_URL`, and
+`STUDIO_PROFILE` (the browser profile directory — see the snap note below before
+moving it).
 
 **If rotation fails**, it's almost always the graphics driver. The GR6 has a
 discrete NVIDIA GPU, and the proprietary driver doesn't always expose RandR
@@ -206,6 +208,26 @@ still containing a literal `__DIR__`, an `Exec=` pointing at a checkout that has
 since moved, or `Hidden=true` — which is what XFCE's *Session and Startup* adds
 when the entry is unchecked there, leaving a file that looks perfectly correct
 while doing nothing.
+
+### The browser restarts every 3 seconds
+
+```
+Failed to create ~/.config/studio-kiosk/SingletonLock: Permission denied (13)
+Failed to create a ProcessSingleton for your profile directory. Aborting now.
+```
+
+Snap confinement. On 22.04+ `chromium-browser` is a transitional package for the
+snap, and snap's `home` interface grants `@{HOME}/[^.]**` — **non-hidden paths
+only**. A profile anywhere under a dotdir can't be locked, and chromium aborts
+rather than risk corrupting it, so `kiosk.sh` faithfully restarts it forever.
+
+The permission is not a Unix permission and `chmod` won't touch it: the
+directory is yours and the denial comes from AppArmor.
+
+`kiosk.sh` therefore keeps the profile at `~/studio-kiosk`, without the dot,
+which works for the snap and the `.deb` alike. If you override `STUDIO_PROFILE`,
+keep it out of a hidden directory. The old `~/.config/studio-kiosk` is orphaned
+after this change and can be deleted.
 
 ### Logs
 

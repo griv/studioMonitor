@@ -12,7 +12,12 @@ set -uo pipefail
 
 URL="${STUDIO_URL:-http://localhost:3000/}"
 ROTATE="${STUDIO_ROTATE:-left}"
-PROFILE="${HOME}/.config/studio-kiosk"
+# Deliberately NOT under ~/.config. Ubuntu's chromium-browser is a transitional
+# package for the snap, and snap's home interface grants `@{HOME}/[^.]**` —
+# non-hidden paths only. From a dotdir chromium can't take its SingletonLock and
+# aborts rather than risk corrupting the profile, so this loop restarts it every
+# 3s forever. A plain directory works for the snap and the .deb alike.
+PROFILE="${STUDIO_PROFILE:-$HOME/studio-kiosk}"
 
 # ── Logging ─────────────────────────────────────────────────────────────────
 # An autostart entry's stdout goes to nowhere in particular, which is exactly

@@ -88,8 +88,10 @@ echo "    $(node --version), npm $(npm --version) — node:sqlite available"
 
 step "Browser"
 if ! command -v chromium-browser >/dev/null && ! command -v chromium >/dev/null; then
-  # On 22.04+ the apt package is a transitional shim for the snap. That works
-  # fine here — the kiosk profile lives under $HOME, so confinement isn't a problem.
+  # On 22.04+ the apt package is a transitional shim for the snap. That is
+  # workable, but only because kiosk.sh keeps its profile in a non-hidden
+  # directory: snap's home interface grants `@{HOME}/[^.]**`, so a profile in a
+  # dotdir can't take its lock and chromium aborts on every launch.
   sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
 fi
 
