@@ -178,6 +178,12 @@
     let activeSlide = null;
     let captionTimer = null;
     let collectionCaptionDue = false;
+    // Listener group for the video currently driving the schedule. Aborted the
+    // moment anything else takes over, because the outgoing clip keeps playing
+    // through the crossfade and would otherwise carry on rescheduling `timer`
+    // out from under the slide that replaced it.
+    let videoWatch = null;
+    let preloadEl = null;   // holds a reference so the fetch isn't collected
 
     // ── Caption ─────────────────────────────────────────────────────────────
 
@@ -296,6 +302,9 @@
         el.muted = true;
         el.playsInline = true;
         el.loop = false;
+        // The incoming slide is already fading up by the time it is asked to
+        // paint. Without this you crossfade into black for the first half-second.
+        el.preload = 'auto';
       }
       el.style.objectFit = fit;
       return el;
@@ -307,6 +316,7 @@
       slide.className = 'slide';
       slide.style.transition = `opacity ${fadeDuration}ms ease-in-out`;
       slide.dataset.fit = fit;
+      slide.dataset.type = item.type;   // read when this slide becomes the outgoing one
 
       const src = item.file;
       const tag = item.type === 'video' ? 'video' : 'img';
@@ -333,7 +343,14 @@
         el.style.animation = `${anim} var(--kb-dur, 12s) ease-in-out forwards`;
         el.addEventListener('error', () => advance(), { once: true });
         if (tag === 'video') {
-          el.addEventListener('ended', () => advance(), { once: true });
+          // The global --kb-dur is derived from dwell time, which a video ignores.
+          // An element-level override makes the move span the clip instead of
+          // finishing early and then sitting still for the rest of it.
+          el.addEventListener('loadedmetadata', () => {
+            if (Number.isFinite(el.duration) && el.duration > 0) {
+              el.style.setProperty('--kb-dur', `${el.duration}s`);
+            }
+          }, { once: true });
         }
         wrap.appendChild(el);
         slide.appendChild(wrap);
@@ -343,9 +360,6 @@
         const el = makeMediaEl(tag, src, fit === 'cover' ? 'cover' : 'contain');
         el.className = 'main';
         el.addEventListener('error', () => advance(), { once: true });
-        if (tag === 'video') {
-          el.addEventListener('ended', () => advance(), { once: true });
-        }
         slide.appendChild(el);
       }
 
@@ -354,6 +368,45 @@
 
     // ── Playback ────────────────────────────────────────────────────────────
 
+    // Waiting for `ended` means the picture freezes on the last frame and only
+    // then starts to fade — which reads as a stall, not a transition. Start the
+    // fade `leadMs` early instead, so the outgoing clip is still moving as the
+    // next piece comes up underneath it.
+    //
+    // Replanned on every timeupdate rather than set once from `duration`: a clip
+    // that buffers, decodes slowly, or reports its duration late would otherwise
+    // leave the schedule pointing at the wrong moment for the rest of the clip.
+    function scheduleVideoAdvance(video, leadMs) {
+      if (!video) { timer = setTimeout(advance, state.settings.dwellTime); return; }
+
+      const watch = new AbortController();
+      videoWatch = watch;
+      const opts = { signal: watch.signal };
+      const fire = () => { watch.abort(); advance(); };
+
+      const plan = () => {
+        const dur = video.duration;
+        // Unknown so far — `ended` and the stall fallback still cover us.
+        if (!Number.isFinite(dur) || dur <= 0) return;
+        // A clip shorter than the crossfade would begin fading before it had
+        // shown anything. Never give up more than half of one.
+        const lead = Math.min(leadMs, (dur * 1000) / 2);
+        const remaining = (dur - video.currentTime) * 1000 / (video.playbackRate || 1);
+        clearTimeout(timer);
+        timer = setTimeout(fire, Math.max(0, remaining - lead));
+      };
+
+      for (const ev of ['loadedmetadata', 'durationchange', 'timeupdate', 'play', 'ratechange', 'seeked']) {
+        video.addEventListener(ev, plan, opts);
+      }
+      video.addEventListener('ended', fire, opts);
+
+      // Autoplay can be refused and a decode can wedge before `timeupdate` ever
+      // fires. Without this the wall stops on one frame until someone notices.
+      timer = setTimeout(fire, 90_000);
+      plan();   // duration may already be known from the preload
+    }
+
     function showItem(index) {
       if (!state || !state.mediaList.length) {
         emptyEl.classList.add('visible');
@@ -361,11 +414,20 @@
       }
       emptyEl.classList.remove('visible');
 
+      clearTimeout(timer);
+      videoWatch?.abort();
+      videoWatch = null;
+
       currentIndex = ((index % state.mediaList.length) + state.mediaList.length) % state.mediaList.length;
       const item = state.mediaList[currentIndex];
-      const fadeDuration = state.settings.transitionDuration;
       const globalFit = state.settings.objectFit || 'contain';
-      const fit = item.fit || globalFit;
+
+      // A crossfade out of a video has to begin before the clip ends, so the fade
+      // length and the head start are necessarily the same number — one setting.
+      // Stills keep the general transition duration.
+      const crossfade = state.settings.videoCrossfadeMs ?? 1500;
+      const leavingVideo = activeSlide?.dataset.type === 'video' && crossfade > 0;
+      const fadeDuration = leavingVideo ? crossfade : state.settings.transitionDuration;
 
       // Update Ken Burns duration from dwell time
       document.documentElement.style.setProperty('--kb-dur', `${(state.settings.dwellTime + fadeDuration) / 1000}s`);
@@ -373,11 +435,16 @@
       const newSlide = buildSlide(item, globalFit, fadeDuration);
       stage.appendChild(newSlide);
 
-      // Preload next image
+      // Preload what's next, so the fade lands on a decoded frame rather than black.
       const next = state.mediaList[(currentIndex + 1) % state.mediaList.length];
       if (next?.type === 'image') {
         const pre = new Image();
         pre.src = next.file;
+      } else if (next?.type === 'video') {
+        preloadEl = document.createElement('video');
+        preloadEl.muted = true;
+        preloadEl.preload = 'auto';
+        preloadEl.src = next.file;
       }
 
       // Fade in
@@ -385,20 +452,20 @@
         newSlide.classList.add('active');
         if (activeSlide) {
           const old = activeSlide;
+          // The outgoing slide was built with whatever duration was current when
+          // it appeared. Both halves of a crossfade have to agree, or the picture
+          // dips through black in the middle or double-exposes at the ends.
+          old.style.transitionDuration = `${fadeDuration}ms`;
           old.classList.remove('active');
           setTimeout(() => old.remove(), fadeDuration + 100);
         }
         activeSlide = newSlide;
       }));
 
-      // Schedule next
-      clearTimeout(timer);
-      const isVideo = item.type === 'video';
-      const isKB    = fit === 'ken-burns';
-
-      if (isVideo && fit !== 'ken-burns') {
-        // video: advance on ended (already wired in buildSlide); fallback timer
-        timer = setTimeout(advance, 90_000);
+      // Schedule next. Videos run to their own length whatever the fit — dwell
+      // time has nothing to say about how long a clip is.
+      if (item.type === 'video') {
+        scheduleVideoAdvance(newSlide.querySelector('video'), crossfade);
       } else {
         timer = setTimeout(advance, state.settings.dwellTime);
       }

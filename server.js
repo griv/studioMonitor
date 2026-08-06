@@ -58,6 +58,10 @@ let state = {
   settings: {
     dwellTime: 8000,
     transitionDuration: 2000,
+    // Both the fade length and how early it starts, since for a video those are
+    // the same number — see the display's scheduleVideoAdvance(). 0 restores the
+    // old behaviour of waiting for the clip to end before fading.
+    videoCrossfadeMs: 1500,
     shuffle: false,
     objectFit: 'blur-bg',
     captionMode: 'collection',   // consumed by the display in Step 4
@@ -327,6 +331,7 @@ app.post('/api/vibe/:name', (req, res) => {
     ...state.settings,
     dwellTime: vibe.dwellTime ?? state.settings.dwellTime,
     transitionDuration: vibe.transitionDuration ?? state.settings.transitionDuration,
+    videoCrossfadeMs: vibe.videoCrossfadeMs ?? state.settings.videoCrossfadeMs,
     shuffle: doShuffle,
     objectFit: vibe.defaultFit ?? state.settings.objectFit,
     captionMode: vibe.captionMode ?? state.settings.captionMode,

@@ -76,6 +76,7 @@ A source is a bank, a group of banks, or an artist:
   ],
   "dwellTime": 8000,
   "transitionDuration": 2000,
+  "videoCrossfadeMs": 1500,
   "shuffle": false,
   "defaultFit": "contain"
 }
@@ -109,15 +110,27 @@ a 3:2 landscape photo covers barely a third of a 1080×1920 screen.
 | `blur-bg` | Blurred, darkened copy fills the frame; the image sits contained on top. Best default for mixed-aspect content in portrait. |
 | `contain` | Whole image, letterboxed. |
 | `cover` | Fills the frame, centre-cropped. |
-| `ken-burns` | Slow zoom/drift over a cover-cropped image, timed to the dwell duration. |
+| `ken-burns` | Slow zoom/drift over a cover-cropped image, timed to the dwell duration — or, on a video, to the length of the clip. |
 
 Resolved most-specific-first: **per item → bank default → session setting → `contain`**.
 
 ### Playback
 
 Images advance after `dwellTime` (default 8 s), cross-fading over `transitionDuration`
-(default 2 s). Videos play muted and advance when they end, with a 90 s fallback. A broken
-file skips itself rather than stalling the wall.
+(default 2 s). A broken file skips itself rather than stalling the wall.
+
+Videos play muted and run to their own length — `dwellTime` has nothing to say about how
+long a clip is, at any fit. The crossfade out of one starts `videoCrossfadeMs` (default
+1.5 s) *before* the clip ends, so the picture is still moving as the next piece comes up
+underneath it; waiting for the end instead leaves the last frame frozen on the wall for
+the length of the fade, which reads as a stall rather than a transition. That one number
+is both the fade length and the head start, because for a video they are necessarily the
+same thing. Set it to `0` to wait for the last frame.
+
+The schedule is recomputed as the clip plays rather than fixed once from its duration, so
+buffering or a slow decode moves the fade with it. A clip shorter than the crossfade gives
+up at most half its length. `ended` and a 90 s stall timer remain as fallbacks for a video
+that never reports a duration.
 
 ### Captions
 
@@ -164,7 +177,7 @@ Enough surface to drive everything from Home Assistant or `curl`.
 | `GET` | `/api/status` | Current state snapshot |
 | `POST` | `/api/bank/:name` | Play a bank |
 | `POST` | `/api/vibe/:name` | Play a vibe |
-| `POST` | `/api/settings` | Patch `dwellTime`, `transitionDuration`, `shuffle`, `objectFit`, `captionMode`, `captionHoldMs` |
+| `POST` | `/api/settings` | Patch `dwellTime`, `transitionDuration`, `videoCrossfadeMs`, `shuffle`, `objectFit`, `captionMode`, `captionHoldMs` |
 
 **Library** — these key on *id*, so renaming isn't a delete-and-recreate:
 

@@ -667,14 +667,21 @@
       <label>Dwell time</label>
       <div class="range-row">
         <input type="range" id="dwell-range" min="2000" max="30000" step="500">
-        <span class="range-val" id="dwell-val">8s</span>
+        <span class="range-val" id="dwell-range-val">8s</span>
       </div>
     </div>
     <div class="field">
       <label>Transition</label>
       <div class="range-row">
         <input type="range" id="trans-range" min="500" max="6000" step="250">
-        <span class="range-val" id="trans-val">2s</span>
+        <span class="range-val" id="trans-range-val">2s</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>Video crossfade</label>
+      <div class="range-row">
+        <input type="range" id="vxfade-range" min="0" max="6000" step="250">
+        <span class="range-val" id="vxfade-range-val">1.5s</span>
       </div>
     </div>
     <div class="field">
@@ -842,6 +849,15 @@
         <input type="range" id="set-trans" min="500" max="6000" step="250">
         <span class="range-val" id="set-trans-val">2s</span>
       </div>
+    </div>
+    <div class="field">
+      <label>Video crossfade</label>
+      <div class="range-row">
+        <input type="range" id="set-vxfade" min="0" max="6000" step="250">
+        <span class="range-val" id="set-vxfade-val">1.5s</span>
+      </div>
+      <div class="inherit-hint">Begins this far before a clip ends, so it fades while the picture
+        is still moving. Off waits for the last frame, which reads as a stall.</div>
     </div>
     <div class="field">
       <label>Global fit</label>
@@ -1512,7 +1528,9 @@ document.getElementById('bank-save').onclick = async () => {
 // ── Display settings ──────────────────────────────────────────────────────────
 // POST /api/settings existed from the start and nothing ever called it.
 
-const secs = ms => `${(ms / 1000).toFixed(1)}s`;
+// Only the video crossfade can reach 0, and there "0.0s" understates it — it
+// isn't an instant cut, it's the anticipation switched off entirely.
+const secs = ms => (+ms === 0 ? 'Off' : `${(ms / 1000).toFixed(1)}s`);
 
 function bindRange(id, onInput) {
   const input = document.getElementById(id);
@@ -1556,6 +1574,7 @@ function openSettingsModal() {
   setRange('set-hold', s.captionHoldMs ?? 6000);
   setRange('set-dwell', s.dwellTime ?? 8000);
   setRange('set-trans', s.transitionDuration ?? 2000);
+  setRange('set-vxfade', s.videoCrossfadeMs ?? 1500);
   fillFitSelect(document.getElementById('set-fit'), '— none (letterbox) —');
   document.getElementById('set-fit').value = s.objectFit || '';
   document.getElementById('set-shuffle').classList.toggle('on', !!s.shuffle);
@@ -1566,6 +1585,7 @@ function openSettingsModal() {
 bindRange('set-hold', updateCaptionHint);
 bindRange('set-dwell', updateCaptionHint);
 bindRange('set-trans');
+bindRange('set-vxfade');
 document.getElementById('set-shuffle').onclick = function () { this.classList.toggle('on'); };
 document.getElementById('settings-btn').onclick = openSettingsModal;
 document.getElementById('settings-cancel').onclick = () => closeModal('settings-backdrop');
@@ -1577,6 +1597,7 @@ document.getElementById('settings-save').onclick = async () => {
       captionHoldMs: +document.getElementById('set-hold').value,
       dwellTime: +document.getElementById('set-dwell').value,
       transitionDuration: +document.getElementById('set-trans').value,
+      videoCrossfadeMs: +document.getElementById('set-vxfade').value,
       objectFit: document.getElementById('set-fit').value || null,
       shuffle: document.getElementById('set-shuffle').classList.contains('on'),
     });
@@ -1739,12 +1760,9 @@ function openVibeModal(vibe) {
 
   buildBankChecks(document.getElementById('vibe-banks-checks'), vibe ? vibeBanks(vibe) : []);
 
-  const dwell = vibe?.dwellTime ?? 8000;
-  const trans = vibe?.transitionDuration ?? 2000;
-  document.getElementById('dwell-range').value = dwell;
-  document.getElementById('dwell-val').textContent = (dwell / 1000).toFixed(1) + 's';
-  document.getElementById('trans-range').value = trans;
-  document.getElementById('trans-val').textContent = (trans / 1000).toFixed(1) + 's';
+  setRange('dwell-range', vibe?.dwellTime ?? 8000);
+  setRange('trans-range', vibe?.transitionDuration ?? 2000);
+  setRange('vxfade-range', vibe?.videoCrossfadeMs ?? 1500);
   document.getElementById('vibe-fit-select').value = vibe?.defaultFit || '';
   const shuffleEl = document.getElementById('shuffle-toggle');
   shuffleEl.classList.toggle('on', vibe?.shuffle ?? false);
@@ -1752,12 +1770,9 @@ function openVibeModal(vibe) {
   document.getElementById('modal-backdrop').classList.add('open');
 }
 
-document.getElementById('dwell-range').oninput = e => {
-  document.getElementById('dwell-val').textContent = (e.target.value / 1000).toFixed(1) + 's';
-};
-document.getElementById('trans-range').oninput = e => {
-  document.getElementById('trans-val').textContent = (e.target.value / 1000).toFixed(1) + 's';
-};
+bindRange('dwell-range');
+bindRange('trans-range');
+bindRange('vxfade-range');
 document.getElementById('shuffle-toggle').onclick = function() { this.classList.toggle('on'); };
 
 document.getElementById('vibe-cancel-btn').onclick = () => closeVibeModal();
@@ -1781,6 +1796,7 @@ document.getElementById('vibe-save-btn').onclick = async () => {
     sources: [...selectedBanks.map(b => ({ type: 'bank', value: b })), ...kept],
     dwellTime: +document.getElementById('dwell-range').value,
     transitionDuration: +document.getElementById('trans-range').value,
+    videoCrossfadeMs: +document.getElementById('vxfade-range').value,
     defaultFit: document.getElementById('vibe-fit-select').value || null,
     shuffle: document.getElementById('shuffle-toggle').classList.contains('on'),
   };
