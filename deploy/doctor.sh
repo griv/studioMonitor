@@ -172,10 +172,34 @@ else
     ok "X11 session"
   fi
 
-  pgrep -f 'deploy/kiosk.sh' >/dev/null \
-    && ok "kiosk.sh is running" \
-    || bad "kiosk.sh is not running — start it now with: $REPO_DIR/deploy/kiosk.sh &" \
-           "log out and back in, or reboot, to confirm it starts by itself"
+  if pgrep -f 'deploy/kiosk.sh' >/dev/null; then
+    ok "kiosk.sh is running"
+
+    # bash read the script at login, so the running copy is a snapshot. If it
+    # started before the file was last written it is executing old code — which
+    # is what makes an update look like it changed nothing at all.
+    KPID="$(pgrep -f 'deploy/kiosk.sh' | head -1)"
+    ETIMES="$(ps -o etimes= -p "$KPID" 2>/dev/null | tr -d ' ')"
+    MTIME="$(stat -c %Y "$REPO_DIR/deploy/kiosk.sh" 2>/dev/null \
+             || stat -f %m "$REPO_DIR/deploy/kiosk.sh" 2>/dev/null)"
+    # Validate separately: concatenating them hides an empty ETIMES behind a
+    # numeric MTIME, and an empty value is 0 in arithmetic — which would report
+    # a stale process as current, the one answer worse than saying nothing.
+    case "$ETIMES" in ''|*[!0-9]*) ETIMES="" ;; esac
+    case "$MTIME"  in ''|*[!0-9]*) MTIME=""  ;; esac
+
+    if [ -z "$ETIMES" ] || [ -z "$MTIME" ]; then
+      skip "can't tell how long kiosk.sh has been running"
+    elif [ "$(( $(date +%s) - ETIMES ))" -lt "$MTIME" ]; then
+      bad "the running kiosk.sh predates the file on disk — it's executing old code" \
+          "cd $REPO_DIR && ./deploy/update.sh --kiosk"
+    else
+      ok "running the current kiosk.sh"
+    fi
+  else
+    bad "kiosk.sh is not running" \
+        "cd $REPO_DIR && ./deploy/update.sh --kiosk"
+  fi
 
   pgrep -f 'user-data-dir.*studio-kiosk' >/dev/null \
     && ok "kiosk browser is up" \

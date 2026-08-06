@@ -111,7 +111,7 @@ comes up with the desktop. The server doesn't need X, and the kiosk waits up to
 ```sh
 cd ~/studioMonitor
 ./deploy/update.sh           # server-side changes
-./deploy/update.sh --kiosk   # also reload the browser, for public/*.html changes
+./deploy/update.sh --kiosk   # also restart the kiosk, for public/*.html or kiosk.sh
 ```
 
 Run it over SSH from the studio Mac — no need to touch the box.
@@ -122,6 +122,18 @@ opening a merge you'd have to resolve on a machine with no keyboard attached.
 A server restart alone is enough for back-end changes: the display's SSE stream
 drops, reconnects within ~3s and re-fetches state. Front-end changes need the
 browser to reload the page, hence `--kiosk`.
+
+`--kiosk` restarts **`kiosk.sh` itself**, not only the browser. bash read that
+script at login, so the running copy is a snapshot: a change to the profile
+path, the browser flags or the rotation is invisible to it, and killing only the
+browser hands it straight back to the old script to relaunch with the old
+settings — which looks exactly like the update having done nothing. `doctor.sh`
+reports a running `kiosk.sh` that predates the file on disk for the same reason.
+
+Restarted this way it inherits the SSH environment rather than the desktop
+session's, so the `xfconf-query` calls that disable XFCE's screensaver may not
+apply until the next login. They're best-effort anyway — `xset` does the real
+work and only needs `DISPLAY`.
 
 ### Why `vibes.json` and `media-config.json` are gitignored
 
