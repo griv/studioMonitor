@@ -185,6 +185,12 @@
     let videoWatch = null;
     let preloadEl = null;   // holds a reference so the fetch isn't collected
 
+    // The running order, as positions into state.mediaList. Held here rather than
+    // baked into mediaList itself so the server can keep that in stable library
+    // order — which is what lets it match items across a rescan.
+    let playOrder = [];
+    let playPos = 0;
+
     // ── Caption ─────────────────────────────────────────────────────────────
 
     const collectionName = () =>
@@ -294,6 +300,24 @@
 
     // ── Slide builders ──────────────────────────────────────────────────────
 
+    // Where a cover-cropped frame sits within the image. 50% is dead centre and
+    // is what `cover` does; `cover-random` picks a fresh one each time the piece
+    // comes round, so a photo that gets cropped isn't cropped the same way twice.
+    //
+    // 15–85 rather than 0–100: the extremes crop hard against one edge, which
+    // stops reading as a considered crop and starts reading as a mistake.
+    const jitterPct = () => `${(15 + Math.random() * 70).toFixed(1)}%`;
+
+    // Only the axis that actually overflows can move, so set both and let the
+    // geometry decide — a landscape photo in a portrait frame shifts sideways
+    // and ignores the vertical half entirely.
+    function applyPosition(el, item, fit) {
+      // A stored position is an explicit decision about this piece. Random is
+      // for the ones where nobody has made that decision.
+      if (item.objectPosition) el.style.objectPosition = item.objectPosition;
+      else if (fit === 'cover-random') el.style.objectPosition = `${jitterPct()} ${jitterPct()}`;
+    }
+
     function makeMediaEl(tag, src, fit) {
       const el = document.createElement(tag);
       el.src = src;
@@ -340,6 +364,7 @@
         const wrap = document.createElement('div');
         wrap.className = 'kb-wrap';
         const el = makeMediaEl(tag, src, 'cover');
+        applyPosition(el, item, fit);   // honours an explicit crop; KB supplies its own variance
         el.style.animation = `${anim} var(--kb-dur, 12s) ease-in-out forwards`;
         el.addEventListener('error', () => advance(), { once: true });
         if (tag === 'video') {
@@ -356,14 +381,55 @@
         slide.appendChild(wrap);
 
       } else {
-        // contain or cover
-        const el = makeMediaEl(tag, src, fit === 'cover' ? 'cover' : 'contain');
+        // contain, cover or cover-random
+        const fills = fit === 'cover' || fit === 'cover-random';
+        const el = makeMediaEl(tag, src, fills ? 'cover' : 'contain');
         el.className = 'main';
+        applyPosition(el, item, fit);
         el.addEventListener('error', () => advance(), { once: true });
         slide.appendChild(el);
       }
 
       return slide;
+    }
+
+    // ── Running order ───────────────────────────────────────────────────────
+    // Random means a shuffled pass over the whole collection, then a fresh
+    // shuffle for the next one — every piece gets a turn before any piece gets a
+    // second. Picking at random each time would be simpler and worse: with 7
+    // items you'd see a repeat within three slides about half the time, which
+    // reads as the wall being stuck rather than as randomness.
+
+    function buildPlayOrder(avoidFirst) {
+      const n = state.mediaList.length;
+      const order = Array.from({ length: n }, (_, i) => i);
+      if (!state.settings.shuffle) return order;
+
+      for (let i = n - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [order[i], order[j]] = [order[j], order[i]];
+      }
+      // A new pass must not open with the piece that closed the last one. It's
+      // the only repeat anybody actually notices, and it's the one thing the
+      // whole arrangement is supposed to rule out.
+      if (n > 1 && order[0] === avoidFirst) [order[0], order[n - 1]] = [order[n - 1], order[0]];
+      return order;
+    }
+
+    function startPlayback() {
+      playOrder = buildPlayOrder(-1);
+      playPos = 0;
+      showItem(playOrder.length ? playOrder[0] : 0);
+    }
+
+    // Rebuild around whatever is on screen: a rescan or a change of order mode
+    // shouldn't jump the wall to a different piece, and the rest of the pass
+    // should still cover everything else exactly once.
+    function resyncPlayOrder(onScreenIndex) {
+      playOrder = buildPlayOrder(-1);
+      const at = playOrder.indexOf(onScreenIndex);
+      if (at > 0) [playOrder[0], playOrder[at]] = [playOrder[at], playOrder[0]];
+      playPos = 0;
     }
 
     // ── Playback ────────────────────────────────────────────────────────────
@@ -473,7 +539,23 @@
       captionOnSlide(item);
     }
 
-    function advance() { showItem(currentIndex + 1); }
+    function advance() {
+      if (!state || !state.mediaList.length) { showItem(0); return; }
+
+      // The list can change under us between slides; rebuild rather than index
+      // into a stale order.
+      if (playOrder.length !== state.mediaList.length) resyncPlayOrder(currentIndex);
+
+      playPos++;
+      if (playPos >= playOrder.length) {
+        // Pass complete — everything has had a turn. Reshuffle so the next one
+        // isn't the same sequence again, which is what made a single shuffle at
+        // load time feel repetitive the moment it came round twice.
+        playOrder = buildPlayOrder(playOrder[playOrder.length - 1]);
+        playPos = 0;
+      }
+      showItem(playOrder[playPos]);
+    }
 
     // ── State management ────────────────────────────────────────────────────
 
@@ -484,6 +566,7 @@
 
       const prevEpoch = state?.collectionEpoch;
       const prevMode = state?.settings?.captionMode;
+      const prevShuffle = state?.settings?.shuffle;
       const onScreen = state?.mediaList[currentIndex]?.file;
 
       state = newState;
@@ -491,13 +574,18 @@
       // for something to happen.
       if (newState.collectionEpoch !== prevEpoch) collectionCaptionDue = true;
 
-      if (!activeSlide) { clearTimeout(timer); currentIndex = 0; showItem(0); return; }
+      if (!activeSlide) { clearTimeout(timer); startPlayback(); return; }
 
       if (state.settings.captionMode !== prevMode) {
         applyCaptionMode(state.mediaList[currentIndex]);
       }
 
       if (!listChanged) {
+        // Sequential ↔ random arrives without the list changing. Rebuild around
+        // what's on screen so it takes effect at the next advance instead of
+        // cutting away from the piece currently up.
+        if (state.settings.shuffle !== prevShuffle) resyncPlayOrder(currentIndex);
+
         // Same files, different payload — an attribution edit. Restarting here
         // would be wrong, but so is leaving a stale caption on the wall: you'd
         // type an artist name, see nothing change, and conclude it didn't work.
@@ -511,14 +599,14 @@
       const stillThere = state.mediaList.findIndex(m => m.file === onScreen);
       if (stillThere >= 0) {
         currentIndex = stillThere;
+        resyncPlayOrder(stillThere);
         if (collectionCaptionDue) captionOnSlide(state.mediaList[stillThere]);
         else repaintIfVisible(state.mediaList[stillThere]);
         return;
       }
 
       clearTimeout(timer);
-      currentIndex = 0;
-      showItem(0);
+      startPlayback();
     }
 
     fetch('/api/status').then(r => r.json()).then(applyState).catch(console.error);

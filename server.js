@@ -19,7 +19,7 @@ const multer = require('multer');
 const db = require('./lib/db');
 const { scanLibrary, SUPPORTED } = require('./lib/scan');
 const lib = require('./lib/library');
-const { resolveSources, shuffle, preserveOrder } = require('./lib/resolve');
+const { resolveSources, preserveOrder } = require('./lib/resolve');
 const {
   pick, ValidationError, SAFE_NAME,
   ITEM_SPEC, BANK_SPEC, VIBE_SPEC, GROUP_SPEC, SETTINGS_SPEC,
@@ -82,7 +82,13 @@ function broadcast() {
   clients.forEach(res => res.write(msg));
 }
 
-// What the current mode resolves to right now, unshuffled and unordered.
+// mediaList is always in stable library order; `shuffle` is a playback setting the
+// display acts on, not a permutation baked in here. Shuffling at selection time
+// froze one random order for as long as the bank stayed up — so it did cover the
+// whole bank before repeating, and then repeated that same sequence forever.
+// It also fought preserveOrder, which exists to keep positions stable.
+
+// What the current mode resolves to right now, unordered.
 function currentSources() {
   if (state.mode === 'bank' && state.currentBank) return [{ type: 'bank', value: state.currentBank }];
   if (state.mode === 'vibe' && state.currentVibe) {
@@ -299,9 +305,8 @@ app.post('/api/bank/:name', (req, res) => {
   const { name } = req.params;
   if (!SAFE_NAME.test(name)) return res.status(400).json({ error: 'Invalid bank name' });
 
-  let { items } = resolveSources([{ type: 'bank', value: name }]);
+  const { items } = resolveSources([{ type: 'bank', value: name }]);
   if (!items.length) return res.status(404).json({ error: 'Bank not found or empty' });
-  if (state.settings.shuffle) items = shuffle(items);
 
   state.mode = 'bank';
   state.currentBank = name;
@@ -316,11 +321,10 @@ app.post('/api/vibe/:name', (req, res) => {
   const vibe = lib.getVibeByName(req.params.name);
   if (!vibe) return res.status(404).json({ error: 'Vibe not found' });
 
-  let { items, unresolved } = resolveSources(vibe.sources);
+  const { items, unresolved } = resolveSources(vibe.sources);
   if (!items.length) return res.status(400).json({ error: 'No media in vibe sources', unresolved });
 
   const doShuffle = vibe.shuffle ?? state.settings.shuffle;
-  if (doShuffle) items = shuffle(items);
 
   state.mode = 'vibe';
   state.currentVibe = vibe.name;

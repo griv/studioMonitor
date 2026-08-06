@@ -110,14 +110,38 @@ a 3:2 landscape photo covers barely a third of a 1080×1920 screen.
 | `blur-bg` | Blurred, darkened copy fills the frame; the image sits contained on top. Best default for mixed-aspect content in portrait. |
 | `contain` | Whole image, letterboxed. |
 | `cover` | Fills the frame, centre-cropped. |
+| `cover-random` | Fills the frame, cropped from a random offset that changes each time the piece comes round — so a photo that has to lose something doesn't lose the same thing every time. |
 | `ken-burns` | Slow zoom/drift over a cover-cropped image, timed to the dwell duration — or, on a video, to the length of the clip. |
 
 Resolved most-specific-first: **per item → bank default → session setting → `contain`**.
+
+The offset for `cover-random` lands between 15% and 85% on both axes, never hard
+against an edge — past that it stops reading as a crop and starts reading as a
+mistake. Only the axis that actually overflows can move, so a landscape photo in
+a portrait frame shifts sideways and ignores the vertical component entirely. An
+item with an explicit `objectPosition` keeps it: that's a decision someone made
+about that piece, and random is for the ones where nobody has.
 
 ### Playback
 
 Images advance after `dwellTime` (default 8 s), cross-fading over `transitionDuration`
 (default 2 s). A broken file skips itself rather than stalling the wall.
+
+### Order
+
+`shuffle` picks between **sequential** and **random**. Random plays a shuffled pass
+over the whole collection and then reshuffles for the next one, so every piece gets
+a turn before any piece gets a second, and no piece opens a pass having just closed
+the previous one.
+
+Picking independently at random each slide would be simpler and worse: with seven
+items you'd see a repeat within three slides about half the time, which reads as the
+wall being stuck rather than as randomness.
+
+The order lives in the display, not in `mediaList` — the server keeps that in stable
+library order so it can match items across a rescan. Shuffling once at selection time,
+which is what this replaced, did cover the bank before repeating and then repeated
+that same sequence for as long as the bank stayed up.
 
 Videos play muted and run to their own length — `dwellTime` has nothing to say about how
 long a clip is, at any fit. The crossfade out of one starts `videoCrossfadeMs` (default
