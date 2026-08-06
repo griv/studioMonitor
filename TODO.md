@@ -115,11 +115,13 @@ Target box: ASUS GR6 mini PC, Xubuntu. See [deploy/README.md](deploy/README.md).
 - [ ] **Resize/re-encode images** to fit 1080×1920 at upload, keeping an original if I want
       to re-derive later.
 - [ ] **Honour EXIF orientation** — phone photos will otherwise show up sideways.
-- [ ] **Don't silently overwrite.** Uploads keep `file.originalname` verbatim
-      ([server.js:120](server.js#L120)), so a second `IMG_1234.jpg` replaces the first.
-      De-duplicate the filename or hash the contents.
-- [ ] **Delete from the admin UI.** Currently items can only be disabled, never removed —
-      so the disk fills with things I've already rejected.
+- [ ] **Don't silently overwrite.** Uploads still publish under `file.originalname`
+      ([server.js:165](server.js#L165)), so a second `IMG_1234.jpg` replaces the first.
+      De-duplicate the filename or hash the contents. (Path traversal in that name is
+      handled — it goes through `basename()` now — but collisions aren't.)
+- [x] **Delete from the admin UI.** `DELETE /api/items/:id`, wired to a two-tap Delete in
+      the item editor. The file moves to `media/.trash/<bank>/` rather than being
+      unlinked, and the row is dropped so it can't come back as a MISSING tile.
 
 ## 7. Curation
 

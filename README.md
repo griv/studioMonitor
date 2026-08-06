@@ -55,6 +55,10 @@ media/
 Supported: `jpg` `jpeg` `png` `webp` `gif` `mp4` `mov` `webm`. Dotfiles are skipped.
 Uploads through the admin page are capped at 500 MB per file.
 
+Deleting a piece from the admin moves the file to `media/.trash/<bank>/` rather than
+unlinking it — the scanner ignores dot-directories, so it leaves the library but stays
+on disk. Empty it yourself when you're sure.
+
 Media is gitignored — it's content, not code.
 
 Everything the filesystem doesn't say — which items are enabled, what fits them, who made
@@ -183,7 +187,9 @@ Phone-first, at `/admin`.
 - Switch bank or vibe; live "now playing" status over SSE
 - Toggle individual items in or out of rotation
 - Cycle per-item fit, or set a bank-wide default
-- Drag-and-drop upload, including onto a new bank
+- Drag-and-drop upload, including onto a new bank — one request per file, with
+  per-batch progress, automatic retries, and a named list of anything that failed
+- Delete a piece from its editor; the file goes to `media/.trash`
 - Create and edit vibes — pick banks, set dwell, transition, shuffle, fit
 
 Every edit is a PATCH of just the field that changed, so two tabs — or a phone and a
@@ -209,12 +215,13 @@ Enough surface to drive everything from Home Assistant or `curl`.
 |---|---|---|
 | `GET` | `/api/banks` | Banks with all items, including disabled ones |
 | `PATCH` | `/api/items/:id` | Partial: `enabled`, `fit`, `objectPosition`, `title`, `artist`, `year`, `medium`, `source` |
+| `DELETE` | `/api/items/:id` | Moves the file to `media/.trash/<bank>/` and drops the row |
 | `PATCH` | `/api/banks/:name` | Partial: `kind`, `defaultFit`, `default{Artist,Year,Medium,Source}`, `captionMode` |
 | `GET` | `/api/artists` | Distinct artists with counts |
 | `GET` `POST` `PATCH` `DELETE` | `/api/vibes[/:id]` | Vibe CRUD; PATCH may replace `sources` |
 | `GET` `POST` `PATCH` `DELETE` | `/api/groups[/:id]` | Group CRUD |
 | `POST` | `/api/resolve/preview` | `{sources}` → `{count, unresolved}`, for a live count while editing |
-| `POST` | `/api/upload/:bank` | Multipart upload, field `files`; creates the bank if new |
+| `POST` | `/api/upload/:bank` | Multipart upload, field `files`; creates the bank if new. Returns `{uploaded, skipped, failed}` |
 | `GET` | `/api/export` | The whole library as JSON — back this up |
 
 ```sh

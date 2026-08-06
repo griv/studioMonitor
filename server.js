@@ -45,7 +45,10 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/media', express.static(MEDIA_DIR));
+// dotfiles: 'deny' keeps media/.trash and any in-flight upload scratch file out of
+// the served surface. The scanner already ignores both, so nothing the display can
+// reference lives behind a dot.
+app.use('/media', express.static(MEDIA_DIR, { dotfiles: 'deny' }));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 
 // ── State & SSE ───────────────────────────────────────────────────────────────
@@ -130,23 +133,82 @@ function rescan(reason) {
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
+// The admin page sends one request per file. A dozen files used to arrive as a
+// single multipart POST, and diskStorage writes each part to disk as it streams —
+// so a connection that dropped halfway left the first few files written, one
+// truncated, and the rest never sent. The route never ran, so there was no
+// response either: the browser saw a rejected fetch and said nothing. That is
+// what "half of them didn't upload, with no error" looked like from here.
+//
+// Bytes now land under a dot-prefixed scratch name and are renamed into place only
+// once the whole request has arrived, so an interrupted transfer can never enter
+// the library as a half-written image. scanLibrary skips dotfiles, so the scratch
+// files are invisible to it even if a rescan lands mid-upload.
+
+const PART_PREFIX = '.uploading-';
+const TRASH_DIR = path.join(MEDIA_DIR, '.trash');
+let partSeq = 0;
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const bank = req.params.bank;
-    if (!SAFE_NAME.test(bank)) return cb(new Error('Invalid bank name'));
-    const dir = path.join(MEDIA_DIR, bank);
-    fs.mkdirSync(dir, { recursive: true });
+    const dir = path.join(MEDIA_DIR, req.params.bank);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch (err) {
+      return cb(new Error(`Cannot write to bank "${req.params.bank}": ${err.message}`));
+    }
     cb(null, dir);
   },
-  filename: (req, file, cb) => cb(null, file.originalname),
+  filename: (req, file, cb) => {
+    // basename() because originalname is client-supplied: "../../x.jpg" used to be
+    // written verbatim.
+    const temp = `${PART_PREFIX}${partSeq++}-${path.basename(file.originalname)}`;
+    req.partFiles.push(path.join(MEDIA_DIR, req.params.bank, temp));
+    cb(null, temp);
+  },
 });
 
 const upload = multer({
   storage,
   limits: { fileSize: 500 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => cb(null, SUPPORTED.test(file.originalname)),
-});
+  // Rejections are recorded rather than dropped on the floor. Returning 200 with
+  // fewer files than were sent is indistinguishable from a partial failure, and a
+  // phone camera roll is full of .heic.
+  fileFilter: (req, file, cb) => {
+    if (SUPPORTED.test(file.originalname)) return cb(null, true);
+    req.rejectedFiles.push(path.basename(file.originalname));
+    cb(null, false);
+  },
+}).array('files');
+
+function discardParts(req) {
+  for (const p of req.partFiles || []) {
+    try { fs.rmSync(p, { force: true }); } catch { /* the disk problem is elsewhere */ }
+  }
+  req.partFiles = [];
+}
+
+// Scratch files from a transfer that died mid-flight — a closed laptop lid, a power
+// cut. They were never in the library, being dot-prefixed; this just takes the
+// space back, which for a 61MB clip off a phone is worth doing.
+function sweepPartFiles() {
+  let swept = 0;
+  // A missing media directory is rescan()'s story to tell, not this one's.
+  if (!fs.existsSync(MEDIA_DIR)) return 0;
+  try {
+    for (const bank of fs.readdirSync(MEDIA_DIR, { withFileTypes: true })) {
+      if (!bank.isDirectory() || bank.name.startsWith('.')) continue;
+      const dir = path.join(MEDIA_DIR, bank.name);
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.startsWith(PART_PREFIX)) continue;
+        try { fs.rmSync(path.join(dir, f), { force: true }); swept++; } catch { /* leave it */ }
+      }
+    }
+  } catch (err) {
+    console.warn(`[upload] could not sweep interrupted uploads: ${err.message}`);
+  }
+  return swept;
+}
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -200,6 +262,45 @@ app.patch('/api/items/:id', validated(ITEM_SPEC, (req, res, fields) => {
   refreshMediaList();
   res.json({ ok: true, item: lib.getItem(id) });
 }));
+
+// scanLibrary never deletes a row — a file that vanishes is only flagged missing,
+// because an unmounted volume must not destroy hand-typed attribution. An explicit
+// delete is the one case where that rule is wrong: leaving the row behind would
+// park a permanent MISSING tile in the grid that nothing can clear.
+//
+// The file moves to media/.trash rather than being unlinked. This is driven from a
+// phone, one tap from the enable toggle, and the media is often the only copy. The
+// scanner skips dot-directories, so the trash is out of the library while still
+// being reachable over ssh or a file manager.
+app.delete('/api/items/:id', (req, res) => {
+  const id = asId(req.params.id);
+  if (id === null) return res.status(400).json({ error: 'Invalid item id' });
+
+  const item = lib.getItem(id);
+  if (!item) return res.status(404).json({ error: 'Item not found' });
+
+  const bankDir = path.join(MEDIA_DIR, item.bank);
+  const source = path.join(bankDir, item.name);
+  if (path.dirname(source) !== bankDir) {
+    return res.status(400).json({ error: 'Refusing to delete outside the media directory' });
+  }
+
+  // An item already flagged missing has no file to move. Dropping the row is still
+  // the right answer — it is the only way to clear the tile.
+  if (fs.existsSync(source)) {
+    const dir = path.join(TRASH_DIR, item.bank);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.renameSync(source, path.join(dir, `${Date.now()}-${item.name}`));
+    } catch (err) {
+      return res.status(500).json({ error: `Could not move the file to the trash: ${err.message}` });
+    }
+  }
+
+  lib.deleteItem(id);
+  refreshMediaList();
+  res.json({ ok: true, deleted: `${item.bank}/${item.name}` });
+});
 
 // ── Banks ─────────────────────────────────────────────────────────────────────
 
@@ -359,11 +460,63 @@ app.post('/api/settings', validated(SETTINGS_SPEC, (req, res, fields) => {
   res.json({ ok: true, settings: state.settings });
 }));
 
-app.post('/api/upload/:bank', upload.array('files'), (req, res) => {
-  if (!req.files?.length) return res.status(400).json({ error: 'No files uploaded' });
-  rescan('upload');
-  refreshMediaList();
-  res.json({ ok: true, uploaded: req.files.map(f => f.originalname) });
+app.post('/api/upload/:bank',
+  (req, res, next) => {
+    if (!SAFE_NAME.test(req.params.bank)) return res.status(400).json({ error: 'Invalid bank name' });
+    req.partFiles = [];
+    req.rejectedFiles = [];
+    // req.params is empty by the time an app-level error handler runs, so the bank
+    // has to be carried on the request if the log line is going to name it.
+    req.uploadBank = req.params.bank;
+    // A dropped connection leaves multer's write half-finished and the route below
+    // never runs, so the scratch file would otherwise sit in the bank directory
+    // forever. writableFinished distinguishes that from a response we completed.
+    res.on('close', () => { if (!res.writableFinished) discardParts(req); });
+    next();
+  },
+  upload,
+  (req, res) => {
+    const uploaded = [];
+    const failed = [];
+
+    // Everything arrived. Publishing is a rename, which is atomic on the same
+    // filesystem — no reader ever sees a partial file under its real name.
+    for (const file of req.files || []) {
+      const name = path.basename(file.originalname);
+      try {
+        fs.renameSync(file.path, path.join(path.dirname(file.path), name));
+        uploaded.push(name);
+      } catch (err) {
+        failed.push({ name, error: err.message });
+        try { fs.rmSync(file.path, { force: true }); } catch { /* already gone */ }
+      }
+    }
+    req.partFiles = [];
+
+    if (!uploaded.length) {
+      const why = req.rejectedFiles.length
+        ? `Unsupported file type: ${req.rejectedFiles.join(', ')}`
+        : failed[0]?.error || 'No files uploaded';
+      return res.status(400).json({ error: why, skipped: req.rejectedFiles, failed });
+    }
+
+    rescan('upload');
+    refreshMediaList();
+    res.json({ ok: true, uploaded, skipped: req.rejectedFiles, failed });
+  });
+
+// Multer failures — the size limit, an unwritable directory, a connection that died
+// mid-part — would otherwise reach Express's default handler and come back as an
+// HTML 500 the admin page can't parse. That is how a failed upload became a silent
+// one. Answer in JSON, and clean up whatever was half-written.
+app.use('/api/upload', (err, req, res, next) => {
+  discardParts(req);
+  const msg = err.code === 'LIMIT_FILE_SIZE'
+    ? 'Larger than the 500 MB limit'
+    : err.message || 'Upload failed';
+  console.error(`[upload] ${req.uploadBank || '?'}: ${msg}`);
+  if (res.headersSent) return next(err);
+  res.status(400).json({ error: msg });
 });
 
 // ── File watcher ──────────────────────────────────────────────────────────────
@@ -372,7 +525,14 @@ app.post('/api/upload/:bank', upload.array('files'), (req, res) => {
 // mediaList. Coalesce on a trailing edge.
 
 let watchTimer = null;
-chokidar.watch(MEDIA_DIR, { ignoreInitial: true, ignorePermissionErrors: true })
+chokidar.watch(MEDIA_DIR, {
+  ignoreInitial: true,
+  ignorePermissionErrors: true,
+  // Dot-prefixed paths are exactly the ones the scanner already skips: upload
+  // scratch files and .trash. Watching them meant every in-progress upload woke a
+  // rescan that by definition could find nothing.
+  ignored: p => path.basename(p).startsWith('.'),
+})
   .on('all', () => {
     clearTimeout(watchTimer);
     watchTimer = setTimeout(() => { rescan('watcher'); refreshMediaList(); }, 500);
@@ -399,6 +559,9 @@ if (migration.from !== migration.to) {
   console.log(`Database schema ${migration.from} → ${migration.to} (${DB_FILE})`);
 }
 
+const swept = sweepPartFiles();
+if (swept) console.log(`[upload] cleared ${swept} interrupted upload${swept === 1 ? '' : 's'}`);
+
 rescan('boot');
 
 // Only on a genuinely fresh database, and only after the scan has created rows for
@@ -417,7 +580,14 @@ if (banks.length) {
 }
 state.libraryVersion = db.getLibraryVersion();
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Studio Monitor → http://0.0.0.0:${PORT}`);
   console.log(`Admin          → http://0.0.0.0:${PORT}/admin`);
 });
+
+// Node's 5-minute default is a sensible guard against a stalled client on the open
+// internet. This is a LAN appliance, and 500 MB of phone video over wifi to a Pi can
+// legitimately take longer than that — the request being cut off mid-body is the
+// exact failure this uploader exists to stop.
+server.requestTimeout = 30 * 60 * 1000;
+server.headersTimeout = 60 * 1000;

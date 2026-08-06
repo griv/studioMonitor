@@ -594,6 +594,82 @@
     #prompt-input:focus { outline: none; border-color: var(--border-hi); }
     #prompt-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
+    /* ── Upload panel ── */
+    /* Fixed rather than inside the bank card: a new-bank upload has no card yet,
+       and a card can be re-rendered out from under an upload in flight. */
+    #upload-panel {
+      display: none;
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      width: calc(100% - 32px);
+      max-width: 420px;
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      border-radius: 12px;
+      padding: 14px 16px;
+      z-index: 250;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+    }
+    #upload-panel.open { display: block; }
+    .up-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .up-head .spacer { flex: 1; }
+    #up-close {
+      background: none;
+      border: none;
+      color: var(--dim);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+    }
+    #up-close:hover { color: var(--text); }
+    .up-bar {
+      height: 3px;
+      background: var(--surface3);
+      border-radius: 2px;
+      overflow: hidden;
+      margin: 10px 0 8px;
+    }
+    #up-bar-fill {
+      height: 100%;
+      width: 0;
+      background: var(--green);
+      border-radius: 2px;
+      transition: width 0.2s linear;
+    }
+    #up-bar-fill.failed { background: #f87171; }
+    #up-current {
+      font-size: 11px;
+      color: var(--dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #up-errors {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #f87171;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    #up-errors:empty { display: none; }
+    #up-errors .up-err-line {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #up-actions { margin-top: 12px; display: flex; gap: 8px; }
+    #up-actions:empty { display: none; }
+
     /* ── Toast ── */
     #toast {
       position: fixed;
@@ -606,11 +682,17 @@
       font-size: 12px;
       padding: 10px 18px;
       border-radius: 20px;
-      transition: transform 0.3s ease;
+      transition: transform 0.3s ease, opacity 0.3s ease;
       z-index: 300;
       white-space: nowrap;
+      /* Off-screen alone isn't enough once the toast is raised over the upload
+         panel: without this it parks mid-screen as an empty pill. */
+      opacity: 0;
+      pointer-events: none;
     }
-    #toast.show { transform: translateX(-50%) translateY(0); }
+    #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+    /* Both sit bottom-centre. The panel outlives a toast, so the toast steps over it. */
+    #upload-panel.open ~ #toast { bottom: 130px; }
   </style>
 </head>
 <body>
@@ -756,6 +838,7 @@
     </div>
 
     <div class="modal-actions">
+      <button class="btn danger small" id="item-delete">Delete</button>
       <span class="spacer"></span>
       <button class="btn small" id="item-cancel">Cancel</button>
       <button class="btn primary small" id="item-save">Save</button>
@@ -895,6 +978,18 @@
   </div>
 </div>
 
+<div id="upload-panel">
+  <div class="up-head">
+    <span id="up-title">Uploading…</span>
+    <span class="spacer"></span>
+    <button id="up-close" title="Dismiss">×</button>
+  </div>
+  <div class="up-bar"><div id="up-bar-fill"></div></div>
+  <div id="up-current"></div>
+  <div id="up-errors"></div>
+  <div id="up-actions"></div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -904,6 +999,9 @@ let vibesData = { vibes: [] };
 let artists = [];
 let displayState = {};
 let pendingUploadFiles = null;
+// Read by refreshLibrary(), a long way from the uploader, so it lives up here with
+// the rest of the state rather than next to its only writer.
+let uploadsActive = 0;
 let editingItemId = null;
 let editingBankName = null;
 
@@ -1009,8 +1107,10 @@ const findItem = id => banks.flatMap(b => b.items).find(i => i.id === id);
 
 // Called when the server's library version moves past ours. Refetching while a
 // modal is open would pull the ground out from under a form mid-edit, so defer.
+// Same during an upload: every file that lands bumps the version, and re-rendering
+// the grid on each one is both wasteful and a way to lose the card being filled.
 async function refreshLibrary() {
-  if (document.querySelector('.modal-backdrop.open, #prompt-backdrop.open')) {
+  if (uploadsActive || document.querySelector('.modal-backdrop.open, #prompt-backdrop.open')) {
     libraryDirty = true;
     return;
   }
@@ -1204,14 +1304,20 @@ function buildBankCard(bank, startOpen) {
   dz.innerHTML = '<span>Drop files to add · or click to browse</span><input type="file" multiple accept="image/*,video/*">';
   const dzInput = dz.querySelector('input');
   dz.onclick = e => { if (e.target !== dzInput) dzInput.click(); };
-  dzInput.onchange = () => uploadToBank(bank.name, dzInput.files);
+  // Clear the input after reading it: picking the same file twice — which is
+  // exactly what you do after a failed upload — fires no change event otherwise.
+  dzInput.onchange = () => {
+    const picked = [...dzInput.files];
+    dzInput.value = '';
+    uploadToBank(bank.name, picked);
+  };
   setupDropZone(dz, files => uploadToBank(bank.name, files));
   body.appendChild(dz);
 
   card.appendChild(body);
 
   // Card-level drag-over for uploads
-  setupDropZone(card, files => uploadToBank(bank.name, files), true);
+  setupDropZone(card, files => uploadToBank(bank.name, files));
 
   return card;
 }
@@ -1456,11 +1562,51 @@ function openItemModal(item) {
   fitSel.value = item.fit || '';
 
   document.getElementById('item-enabled').classList.toggle('on', item.enabled);
+  disarmItemDelete();
   openModal('item-backdrop');
 }
 
 document.getElementById('item-enabled').onclick = function () { this.classList.toggle('on'); };
 document.getElementById('item-cancel').onclick = () => closeModal('item-backdrop');
+
+// Two taps, because this is a phone and Delete sits next to Save. The button
+// arms itself and disarms on any other interaction with the form.
+const itemDeleteBtn = document.getElementById('item-delete');
+function disarmItemDelete() {
+  itemDeleteBtn.textContent = 'Delete';
+  itemDeleteBtn.dataset.armed = '';
+}
+document.getElementById('item-backdrop').addEventListener('click', e => {
+  if (e.target !== itemDeleteBtn) disarmItemDelete();
+}, true);
+
+itemDeleteBtn.onclick = async () => {
+  const item = findItem(editingItemId);
+  if (!item) return closeModal('item-backdrop');
+
+  if (!itemDeleteBtn.dataset.armed) {
+    itemDeleteBtn.dataset.armed = '1';
+    itemDeleteBtn.textContent = 'Really delete?';
+    return;
+  }
+
+  try {
+    await api.del(`/api/items/${item.id}`);
+  } catch {
+    return;   // toasted; the file is untouched
+  }
+
+  // Drop it from the cached bank so the count and the grid agree without a refetch.
+  const bank = banks.find(b => b.name === item.bank);
+  if (bank) bank.items = bank.items.filter(i => i.id !== item.id);
+  document.querySelector(`.thumb-item[data-item-id="${item.id}"]`)?.remove();
+  refreshCountLabel(item.bank);
+
+  disarmItemDelete();
+  editingItemId = null;
+  closeModal('item-backdrop');
+  toast(`Deleted ${item.name} — it's in media/.trash`);
+};
 
 document.getElementById('item-save').onclick = async () => {
   const item = findItem(editingItemId);
@@ -1665,33 +1811,196 @@ async function switchVibe(name) {
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
-async function uploadToBank(bankName, files) {
-  if (!files?.length) return;
-  const fd = new FormData();
-  [...files].forEach(f => fd.append('files', f));
-  toast(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}…`);
-  const res = await fetch(`/api/upload/${encodeURIComponent(bankName)}`, { method: 'POST', body: fd });
-  const data = await res.json();
-  if (data.ok) {
-    toast(`Added ${data.uploaded.length} file${data.uploaded.length > 1 ? 's' : ''}`);
+// One request per file, in sequence. The whole batch used to go up as a single
+// multipart POST, which meant one dropped connection anywhere in a dozen files
+// took out every file after it — and because the server never got to reply, the
+// page said nothing at all. Per file, a drop costs one file, it says which, and
+// it retries. See the matching note in server.js.
+
+const UPLOAD_RETRIES = 2;
+const RETRY_DELAY_MS = 800;
+
+// Failures that survived the retries, held with their File objects so Retry can
+// resend the actual bytes rather than just naming what went wrong.
+let failedUploads = [];
+
+const upEl = id => document.getElementById(id);
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function sendOneFile(bankName, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append('files', file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/upload/${encodeURIComponent(bankName)}`);
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (data?.libraryVersion) knownLibraryVersion = Math.max(knownLibraryVersion, data.libraryVersion);
+
+      if (xhr.status >= 200 && xhr.status < 300 && data?.uploaded?.length) return resolve(data);
+
+      // A 4xx means the bytes arrived and were refused — an unsupported type, a bad
+      // bank name — so resending them fails the same way. A 5xx is the server having
+      // a bad moment, which is worth another go.
+      const err = new Error(data?.error || `${xhr.status} ${xhr.statusText}`.trim() || 'Rejected');
+      err.permanent = xhr.status >= 400 && xhr.status < 500;
+      reject(err);
+    };
+
+    // No status: the transfer itself failed. That is the retryable case.
+    xhr.onerror = () => reject(new Error('Connection lost'));
+    xhr.ontimeout = () => reject(new Error('Timed out'));
+    xhr.onabort = () => reject(new Error('Cancelled'));
+
+    xhr.send(fd);
+  });
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// One batch at a time. Two drops in quick succession — or a Retry tapped while the
+// tail of a batch is still going — would otherwise share one progress panel and one
+// failedUploads list, and report nonsense for both.
+let uploadChain = Promise.resolve();
+
+function uploadToBank(bankName, files) {
+  const queue = [...(files || [])];
+  if (!queue.length) return Promise.resolve();
+  uploadChain = uploadChain.then(() => runUpload(bankName, queue), () => runUpload(bankName, queue));
+  return uploadChain;
+}
+
+async function runUpload(bankName, queue) {
+  uploadsActive++;
+  failedUploads = [];
+  showUploadPanel(queue.length, bankName);
+
+  let done = 0;
+  for (const file of queue) {
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= UPLOAD_RETRIES; attempt++) {
+      const label = attempt ? `${file.name} · retry ${attempt}` : file.name;
+      setUploadStatus(done, queue.length, label, 0);
+      try {
+        await sendOneFile(bankName, file, frac => setUploadStatus(done, queue.length, label, frac));
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (err.permanent) break;
+        if (attempt < UPLOAD_RETRIES) await sleep(RETRY_DELAY_MS);
+      }
+    }
+
+    if (lastError) {
+      // permanent means the server saw the bytes and refused them, so Retry would
+      // only fail the same way — it isn't offered for those.
+      failedUploads.push({ bankName, file, error: lastError.message, permanent: !!lastError.permanent });
+      addUploadError(file.name, lastError.message);
+    }
+    done++;
+    setUploadStatus(done, queue.length, '', 0);
+  }
+
+  uploadsActive--;
+  finishUploadPanel(queue.length - failedUploads.length, queue.length);
+
+  try {
+    // Refetch even on a partial failure: whatever did land is in the library now.
     banks = await api.get('/api/banks');
     renderBanks();
-    // Re-open the card
-    const card = document.querySelector(`.bank-card[data-bank="${bankName}"]`);
-    if (card) card.classList.add('open');
+    document.querySelector(`.bank-card[data-bank="${bankName}"]`)?.classList.add('open');
+  } catch { /* toasted; the panel already says what landed */ }
+
+  // Library changes that arrived while files were going up were deferred so the
+  // grid wouldn't be rebuilt underneath the upload. Take them now.
+  if (!uploadsActive && libraryDirty) refreshLibrary();
+}
+
+// ── Upload panel ──────────────────────────────────────────────────────────────
+
+function showUploadPanel(total, bankName) {
+  upEl('up-title').textContent = `Uploading ${plural(total, 'file')} to ${bankName}`;
+  upEl('up-errors').innerHTML = '';
+  upEl('up-actions').innerHTML = '';
+  upEl('up-bar-fill').classList.remove('failed');
+  upEl('up-bar-fill').style.width = '0';
+  upEl('up-current').textContent = '';
+  upEl('upload-panel').classList.add('open');
+}
+
+// Progress is over the batch, not the file: the number worth watching on a phone
+// is how much of the drop is left.
+function setUploadStatus(done, total, label, fraction) {
+  upEl('up-bar-fill').style.width = `${Math.round(((done + fraction) / total) * 100)}%`;
+  upEl('up-current').textContent = label ? `${done + 1} of ${total} · ${label}` : '';
+}
+
+function addUploadError(name, message) {
+  const line = document.createElement('div');
+  line.className = 'up-err-line';
+  // The server names the file it refused, so prefixing would say it twice.
+  line.textContent = message.includes(name) ? message : `${name} — ${message}`;
+  upEl('up-errors').appendChild(line);
+}
+
+let uploadHideTimer = null;
+function finishUploadPanel(ok, total) {
+  clearTimeout(uploadHideTimer);
+  upEl('up-current').textContent = '';
+
+  if (!failedUploads.length) {
+    upEl('up-title').textContent = `Added ${plural(total, 'file')}`;
+    upEl('up-bar-fill').style.width = '100%';
+    uploadHideTimer = setTimeout(() => upEl('upload-panel').classList.remove('open'), 2500);
+    return;
+  }
+
+  // Stays put until dismissed. A failure that scrolls away in a toast is a failure
+  // you find out about days later, by noticing a gap on the wall.
+  upEl('up-title').textContent = `${ok} of ${total} uploaded`;
+  // Back off to what actually landed, rather than leaving a full bar that happens
+  // to be red — the bar should agree with the count next to it.
+  upEl('up-bar-fill').style.width = `${Math.round((ok / total) * 100)}%`;
+  upEl('up-bar-fill').classList.add('failed');
+
+  const retryable = failedUploads.filter(f => !f.permanent);
+  const actions = upEl('up-actions');
+  actions.innerHTML = '';
+  if (retryable.length) {
+    const btn = document.createElement('button');
+    btn.className = 'btn primary small';
+    btn.textContent = `Retry ${plural(retryable.length, 'file')}`;
+    // Captured now: uploadToBank clears failedUploads as it starts.
+    const again = retryable.map(f => f.file);
+    btn.onclick = () => uploadToBank(retryable[0].bankName, again);
+    actions.appendChild(btn);
   }
 }
 
+upEl('up-close').onclick = () => {
+  clearTimeout(uploadHideTimer);
+  upEl('upload-panel').classList.remove('open');
+};
+
 // ── Drop zone helper ──────────────────────────────────────────────────────────
-function setupDropZone(el, onDrop, cardMode = false) {
+function setupDropZone(el, onDrop) {
   el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
   el.addEventListener('dragleave', e => {
     if (!el.contains(e.relatedTarget)) el.classList.remove('drag-over');
   });
   el.addEventListener('drop', e => {
     e.preventDefault();
+    // The bank card is itself a drop zone, and the zone inside it is a descendant:
+    // without this a drop on the inner zone bubbles up and uploads the batch twice.
+    e.stopPropagation();
     el.classList.remove('drag-over');
-    const files = e.dataTransfer.files;
+    const files = [...e.dataTransfer.files];
     if (files.length) onDrop(files);
   });
 }
@@ -1700,17 +2009,21 @@ function setupDropZone(el, onDrop, cardMode = false) {
 const newBankZone = document.getElementById('new-bank-zone');
 const newBankInput = document.getElementById('new-bank-input');
 newBankZone.onclick = e => { if (e.target !== newBankInput) newBankInput.click(); };
-newBankInput.onchange = () => promptNewBank(newBankInput.files);
-setupDropZone(newBankZone, files => promptNewBank(files));
+newBankInput.onchange = () => {
+  const picked = [...newBankInput.files];
+  newBankInput.value = '';
+  promptNewBank(picked);
+};
+setupDropZone(newBankZone, files => promptNewBank([...files]));
 
 function promptNewBank(files) {
+  if (!files.length) return;
   pendingUploadFiles = files;
   const suggestion = files[0]?.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_\- ]/g, '') || '';
   openPrompt('Name this bank', suggestion, async name => {
     if (!name.trim()) return;
     await uploadToBank(name.trim(), pendingUploadFiles);
     pendingUploadFiles = null;
-    newBankInput.value = '';
   });
 }
 
